@@ -53,7 +53,7 @@ import com.milelog.data.TxnType
 import com.milelog.ui.components.Divider
 import com.milelog.ui.components.DropdownLabel
 import com.milelog.ui.components.EmptyNote
-import com.milelog.ui.components.PeriodSheet
+import com.milelog.ui.components.PeriodChooser
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SheetList
 import com.milelog.ui.components.SheetRow
@@ -191,9 +191,15 @@ fun TransactionsScreen(vm: TxnVm, onOpenTxn: (Long, TxnType) -> Unit) {
         }
     }
     if (showPeriod) {
-        PeriodSheet(filter.period.period, onPick = {
-            vm.setFilter(filter.copy(period = filter.period.copy(period = it))); showPeriod = false
-        }, onDismiss = { showPeriod = false })
+        PeriodChooser(
+            current = filter.period.period,
+            from = filter.period.from,
+            to = filter.period.to,
+            onPick = { p, f, t ->
+                vm.setFilter(filter.copy(period = PeriodChoice(p, f, t))); showPeriod = false
+            },
+            onDismiss = { showPeriod = false }
+        )
     }
     if (showPurpose) {
         PurposeSheet(

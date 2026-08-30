@@ -35,6 +35,10 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,13 +114,60 @@ fun SheetRow(
     }
 }
 
+/**
+ * The period list, and the two date pickers behind "Pick your own dates". Custom used to
+ * be offered with nothing behind it, which quietly collapsed every total to a single day.
+ */
 @Composable
-fun PeriodSheet(current: Period, onPick: (Period) -> Unit, onDismiss: () -> Unit) {
-    SheetList(title = null, onDismiss = onDismiss) {
-        // Custom is left out until it has a date-range picker behind it; offering it
-        // would silently collapse every total to a single day.
-        Period.entries.filterNot { it == Period.CUSTOM }.forEach { p ->
-            SheetRow(p.label, selected = p == current) { onPick(p) }
+fun PeriodChooser(
+    current: Period,
+    from: LocalDate,
+    to: LocalDate,
+    onPick: (Period, LocalDate, LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var stage by remember { mutableStateOf(0) }
+    var startDate by remember { mutableStateOf(from) }
+
+    when (stage) {
+        0 -> SheetList(title = null, onDismiss = onDismiss) {
+            Period.entries.forEach { p ->
+                SheetRow(
+                    if (p == Period.CUSTOM) "Pick your own dates" else p.label,
+                    selected = p == current
+                ) {
+                    if (p == Period.CUSTOM) stage = 1 else onPick(p, from, to)
+                }
+            }
+        }
+
+        1 -> {
+            // DatePickerSheet always calls onDismiss after OK, so a flag separates
+            // "chose a date" from "backed out".
+            var chosen by remember { mutableStateOf(false) }
+            DatePickerSheet(
+                initial = startDate,
+                onPick = { startDate = it; chosen = true },
+                onDismiss = { if (chosen) stage = 2 else onDismiss() }
+            )
+        }
+
+        else -> {
+            var endDate by remember { mutableStateOf<LocalDate?>(null) }
+            DatePickerSheet(
+                initial = if (to.isBefore(startDate)) startDate else to,
+                onPick = { endDate = it },
+                onDismiss = {
+                    val end = endDate
+                    if (end == null) onDismiss()
+                    // Whichever way round they were picked.
+                    else onPick(
+                        Period.CUSTOM,
+                        minOf(startDate, end),
+                        maxOf(startDate, end)
+                    )
+                }
+            )
         }
     }
 }

@@ -2,7 +2,9 @@ package com.milelog.export
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import com.milelog.data.Category
+import androidx.room.withTransaction
 import com.milelog.data.CategoryKind
 import com.milelog.data.DeductionClass
 import com.milelog.data.Purpose
@@ -343,8 +345,17 @@ object CsvImport {
 
     // ---- committing --------------------------------------------------------------------
 
+    /**
+     * All or nothing. Without a transaction, a failure partway through left the rows it
+     * had already inserted — plus any purposes and categories it had invented — sitting
+     * in the database while the screen reported that the import had failed.
+     */
     suspend fun commit(context: Context, uri: Uri): Result {
         val repo = Repo.get(context)
+        return repo.db.withTransaction { importAll(context, repo, uri) }
+    }
+
+    private suspend fun importAll(context: Context, repo: Repo, uri: Uri): Result {
         val (rawHeaders, rows) = read(context, uri)
         val kind = detectKind(rawHeaders)
 

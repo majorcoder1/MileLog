@@ -52,7 +52,7 @@ import com.milelog.ui.components.Divider
 import com.milelog.ui.components.Donut
 import com.milelog.ui.components.DropdownLabel
 import com.milelog.ui.components.LegendRow
-import com.milelog.ui.components.PeriodSheet
+import com.milelog.ui.components.PeriodChooser
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SectionCard
 import com.milelog.ui.theme.Blue
@@ -322,14 +322,26 @@ fun HomeScreen(
     }
 
     if (showMileagePeriod) {
-        PeriodSheet(mileagePeriod.period, onPick = {
-            vm.setMileagePeriod(mileagePeriod.copy(period = it)); showMileagePeriod = false
-        }, onDismiss = { showMileagePeriod = false })
+        PeriodChooser(
+            current = mileagePeriod.period,
+            from = mileagePeriod.from,
+            to = mileagePeriod.to,
+            onPick = { p, f, t ->
+                vm.setMileagePeriod(PeriodChoice(p, f, t)); showMileagePeriod = false
+            },
+            onDismiss = { showMileagePeriod = false }
+        )
     }
     if (showMoneyPeriod) {
-        PeriodSheet(moneyPeriod.period, onPick = {
-            vm.setMoneyPeriod(moneyPeriod.copy(period = it)); showMoneyPeriod = false
-        }, onDismiss = { showMoneyPeriod = false })
+        PeriodChooser(
+            current = moneyPeriod.period,
+            from = moneyPeriod.from,
+            to = moneyPeriod.to,
+            onPick = { p, f, t ->
+                vm.setMoneyPeriod(PeriodChoice(p, f, t)); showMoneyPeriod = false
+            },
+            onDismiss = { showMoneyPeriod = false }
+        )
     }
     if (showMoneyPurpose) {
         PurposeSheet(

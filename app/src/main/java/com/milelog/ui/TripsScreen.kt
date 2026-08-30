@@ -63,7 +63,7 @@ import com.milelog.ui.components.DatePickerSheet
 import com.milelog.ui.components.Divider
 import com.milelog.ui.components.EmptyNote
 import com.milelog.ui.components.MapPreview
-import com.milelog.ui.components.PeriodSheet
+import com.milelog.ui.components.PeriodChooser
 import com.milelog.ui.components.Pill
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SectionCard
@@ -356,10 +356,16 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
         }
     }
     if (showPeriod) {
-        PeriodSheet(filter.period.period, onPick = {
-            vm.setFilter(filter.copy(period = filter.period.copy(period = it)))
-            showPeriod = false
-        }, onDismiss = { showPeriod = false })
+        PeriodChooser(
+            current = filter.period.period,
+            from = filter.period.from,
+            to = filter.period.to,
+            onPick = { p, f, t ->
+                vm.setFilter(filter.copy(period = PeriodChoice(p, f, t)))
+                showPeriod = false
+            },
+            onDismiss = { showPeriod = false }
+        )
     }
     if (showPlace) {
         PlaceFilterDialog(
