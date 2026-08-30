@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -56,6 +57,7 @@ import com.milelog.ui.components.PeriodSheet
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SheetList
 import com.milelog.ui.components.SheetRow
+import com.milelog.ui.components.SwipeBackdrop
 import com.milelog.ui.components.Tag
 import com.milelog.ui.theme.Blue
 import com.milelog.ui.theme.Card
@@ -78,6 +80,7 @@ fun TransactionsScreen(vm: TxnVm, onOpenTxn: (Long, TxnType) -> Unit) {
     var showType by remember { mutableStateOf(false) }
     var showPurpose by remember { mutableStateOf(false) }
     var showPeriod by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf<Long?>(null) }
 
     val typeLabel = when (filter.type) {
         null -> "All transactions"
@@ -160,10 +163,18 @@ fun TransactionsScreen(vm: TxnVm, onOpenTxn: (Long, TxnType) -> Unit) {
                         scope.launch { vm.classify(row.id, vm.personalPurposeId()) }
                     },
                     onClick = { onOpenTxn(row.id, row.type) },
-                    onDelete = { vm.delete(row.id) }
+                    onDelete = { confirmDelete = row.id }
                 )
             }
         }
+    }
+
+    confirmDelete?.let { id ->
+        ConfirmDelete(
+            what = "this entry",
+            onConfirm = { vm.delete(id); confirmDelete = null },
+            onDismiss = { confirmDelete = null }
+        )
     }
 
     if (showType) {
@@ -215,20 +226,7 @@ private fun SwipeTxnCard(
     )
     SwipeToDismissBox(
         state = state,
-        backgroundContent = {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        when (state.dismissDirection) {
-                            SwipeToDismissBoxValue.StartToEnd -> Blue
-                            SwipeToDismissBoxValue.EndToStart -> Sky
-                            else -> Color.Transparent
-                        }
-                    )
-            )
-        }
+        backgroundContent = { SwipeBackdrop(state.dismissDirection) }
     ) {
         TxnCard(row, onClick, onDelete)
     }
@@ -307,22 +305,22 @@ private fun TxnCard(row: TxnRow, onClick: () -> Unit, onDelete: () -> Unit) {
                 )
                 Spacer(Modifier.width(18.dp))
                 Icon(
-                    Icons.Filled.Notes, null,
+                    Icons.Filled.Notes,
+                    if (row.notes.isNotBlank()) "Has a note" else null,
                     tint = if (row.notes.isNotBlank()) Blue else TextMid,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(18.dp))
                 Icon(
-                    Icons.Filled.PhotoCamera, null,
+                    Icons.Filled.PhotoCamera,
+                    if (!row.receiptPath.isNullOrBlank()) "Has a receipt photo" else "No receipt photo",
                     tint = if (!row.receiptPath.isNullOrBlank()) Blue else TextMid,
                     modifier = Modifier.size(20.dp)
                 )
             }
-            Icon(
-                Icons.Filled.Delete, "Delete",
-                tint = TextMid,
-                modifier = Modifier.size(20.dp).clickable(onClick = onDelete)
-            )
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, "Delete this entry", tint = TextMid, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }

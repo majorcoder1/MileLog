@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -39,7 +39,7 @@ fun MapPreview(
         return
     }
 
-    val geo = points.map { GeoPoint(it.first, it.second) }
+    val geo = remember(points) { points.map { GeoPoint(it.first, it.second) } }
 
     AndroidView(
         modifier = modifier,
@@ -55,7 +55,12 @@ fun MapPreview(
                 )
             }
         },
+        onRelease = { map -> runCatching { map.onDetach() } },
         update = { map ->
+            // Keyed on the route itself, so scrolling or selecting a card does not
+            // rebuild every overlay and re-run the zoom animation.
+            if (map.getTag() == geo) return@AndroidView
+            map.setTag(geo)
             map.overlays.clear()
 
             val line = Polyline(map).apply {
@@ -78,8 +83,6 @@ fun MapPreview(
             map.invalidate()
         }
     )
-
-    DisposableEffect(Unit) { onDispose { } }
 }
 
 private fun dot(map: MapView, point: GeoPoint, color: Int): Marker =

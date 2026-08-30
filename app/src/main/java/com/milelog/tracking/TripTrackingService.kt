@@ -162,13 +162,27 @@ class TripTrackingService : Service() {
             val meters = prev.distanceTo(loc)
             val seconds = ((loc.time - prev.time) / 1000.0).coerceAtLeast(0.5)
             val mph = Geo.metersToMiles(meters.toDouble()) / (seconds / 3600.0)
-            if (meters < 5f) return
-            if (mph > 120) { last = loc; return }
+
+            // Standing still. A parked phone's fix wanders several metres a minute, and
+            // at a red light that wander used to be added as real distance — measured at
+            // roughly six phantom miles a day. The receiver's own Doppler speed is far
+            // more trustworthy here than differencing two positions.
+            val speedMph = if (loc.hasSpeed()) loc.speed * MPH_PER_MPS else mph
+            if (speedMph < STOPPED_MPH && meters < NOISE_METERS) return
+
+            if (meters < MIN_SEGMENT_METERS) return
+            if (mph > MAX_PLAUSIBLE_MPH) { last = loc; return }
             miles += Geo.metersToMiles(meters.toDouble())
         }
         last = loc
         val snapshot = synchronized(points) {
-            if (points.size < MAX_POINTS) points += loc.latitude to loc.longitude
+            if (points.size < MAX_POINTS) {
+                points += loc.latitude to loc.longitude
+            } else {
+                // Past the ceiling, keep moving the final point rather than freezing it,
+                // so a long drive still ends where it actually ended.
+                points[points.lastIndex] = loc.latitude to loc.longitude
+            }
             points.toList()
         }
         TripTracker.update {
@@ -220,7 +234,7 @@ class TripTrackingService : Service() {
         if (raw.isEmpty()) return ""
         val keep = if (raw.size <= STORED_POINTS) raw else {
             val step = raw.size.toDouble() / STORED_POINTS
-            (0 until STORED_POINTS).map { raw[(it * step).toInt().coerceAtMost(raw.lastIndex)] } + raw.last()
+            (0 until STORED_POINTS - 1).map { raw[(it * step).toInt().coerceAtMost(raw.lastIndex)] } + raw.last()
         }
         return keep.joinToString(";") { Geo.formatPoint(it.first, it.second) }
     }
@@ -397,6 +411,14 @@ class TripTrackingService : Service() {
         /** How many route points survive into storage. */
         private const val STORED_POINTS = 200
         private const val PERSIST_EVERY_MS = 20_000L
+
+        private const val MPH_PER_MPS = 2.236936
+        /** Below this the receiver is reporting a vehicle that is not moving. */
+        private const val STOPPED_MPH = 2.0
+        /** How far a fix must jump before it counts as movement rather than GPS wander. */
+        private const val NOISE_METERS = 30f
+        private const val MIN_SEGMENT_METERS = 5f
+        private const val MAX_PLAUSIBLE_MPH = 120.0
         private const val MIN_MILES = 0.1
         private const val STOP_GRACE_MS = 5 * 60 * 1000L
 

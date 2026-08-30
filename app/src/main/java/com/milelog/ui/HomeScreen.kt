@@ -258,6 +258,11 @@ fun HomeScreen(
                     LegendRow(Fmt.miles(mileage.personalMiles), "Personal miles", DonutPersonal)
                 }
                 Donut(
+                    description = "Mileage split: " +
+                        "${Fmt.miles(mileage.businessMiles)} work, " +
+                        "${Fmt.miles(mileage.otherMiles)} other, " +
+                        "${Fmt.miles(mileage.unclassifiedMiles)} unclassified, " +
+                        "${Fmt.miles(mileage.personalMiles)} personal",
                     slices = listOf(
                         DonutWork to mileage.businessMiles,
                         DonutOther to mileage.otherMiles,

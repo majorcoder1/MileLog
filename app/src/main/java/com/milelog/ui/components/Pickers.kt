@@ -113,8 +113,10 @@ fun SheetRow(
 @Composable
 fun PeriodSheet(current: Period, onPick: (Period) -> Unit, onDismiss: () -> Unit) {
     SheetList(title = null, onDismiss = onDismiss) {
-        Period.entries.forEach { p ->
-            SheetRow(p.label, selected = p == current) { onPick(p); }
+        // Custom is left out until it has a date-range picker behind it; offering it
+        // would silently collapse every total to a single day.
+        Period.entries.filterNot { it == Period.CUSTOM }.forEach { p ->
+            SheetRow(p.label, selected = p == current) { onPick(p) }
         }
     }
 }

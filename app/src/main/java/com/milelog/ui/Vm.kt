@@ -333,6 +333,7 @@ class TxnVm(app: Application) : BaseVm(app) {
         repo.purposes.allNow().firstOrNull { it.name == "Personal" }?.id
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TaxesVm(app: Application) : BaseVm(app) {
 
     private val _year = MutableStateFlow(LocalDate.now().year)
@@ -341,8 +342,26 @@ class TaxesVm(app: Application) : BaseVm(app) {
     private val _years = MutableStateFlow(listOf(LocalDate.now().year))
     val years: StateFlow<List<Int>> = _years
 
-    private val _summary = MutableStateFlow(TaxSummary(DayRange.forYear(LocalDate.now().year)))
-    val summary: StateFlow<TaxSummary> = _summary
+    /**
+     * Recomputes when anything the figures depend on changes — trips, transactions,
+     * purposes or the rate table. It used to watch trips only, so entering a fuel
+     * expense left the Taxes tab showing the old profit for the rest of the session.
+     */
+    val summary: StateFlow<TaxSummary> = _year
+        .flatMapLatest { chosen ->
+            val range = DayRange.forYear(chosen)
+            combine(
+                repo.trips.rowsBetween(range.fromMillis, range.toMillis),
+                repo.txns.rowsBetween(range.fromDay, range.toDay),
+                repo.rates.all(),
+                repo.purposesFlow()
+            ) { _, _, _, _ -> range }
+        }
+        .mapLatest { repo.summarize(it) }
+        .stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000),
+            TaxSummary(DayRange.forYear(LocalDate.now().year))
+        )
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
@@ -351,23 +370,11 @@ class TaxesVm(app: Application) : BaseVm(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        viewModelScope.launch {
-            _years.value = repo.yearsWithData()
-            reload()
-        }
-        // Recompute when trips or transactions change.
-        viewModelScope.launch {
-            repo.trips.recentRows(1).collect { reload() }
-        }
+        viewModelScope.launch { _years.value = repo.yearsWithData() }
     }
 
     fun setYear(y: Int) {
         _year.value = y
-        viewModelScope.launch { reload() }
-    }
-
-    private suspend fun reload() {
-        _summary.value = repo.summarize(DayRange.forYear(_year.value))
     }
 
     fun setBusy(v: Boolean) { _busy.value = v }
@@ -406,7 +413,11 @@ class SettingsVm(app: Application) : BaseVm(app) {
 
     fun deleteReminder(r: ServiceReminder) = viewModelScope.launch { repo.schedule.deleteReminder(r) }
 
-    fun saveRate(r: MileageRate) = viewModelScope.launch { repo.rates.update(r) }
+    fun saveRate(r: MileageRate) = viewModelScope.launch {
+        if (r.id == 0L) repo.rates.insert(r) else repo.rates.update(r)
+    }
+
+    fun deleteRate(r: MileageRate) = viewModelScope.launch { repo.rates.delete(r) }
 
     fun savePurpose(p: Purpose) = viewModelScope.launch {
         if (p.id == 0L) repo.purposes.insert(p) else repo.purposes.update(p)

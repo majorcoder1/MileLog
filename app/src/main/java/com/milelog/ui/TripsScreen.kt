@@ -31,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SwipeToDismissBox
@@ -66,6 +67,7 @@ import com.milelog.ui.components.PeriodSheet
 import com.milelog.ui.components.Pill
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SectionCard
+import com.milelog.ui.components.SwipeBackdrop
 import com.milelog.ui.components.Tag
 import com.milelog.ui.theme.Blue
 import com.milelog.ui.theme.Card
@@ -99,6 +101,8 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
     var showPlace by remember { mutableStateOf(false) }
     var showBulkPurpose by remember { mutableStateOf(false) }
     var showTagDialog by remember { mutableStateOf(false) }
+    var confirmDeleteTrip by remember { mutableStateOf<Long?>(null) }
+    var confirmDeleteSelection by remember { mutableStateOf(false) }
 
     val businessId = remember(purposes) {
         purposes.firstOrNull { it.deductionClass == DeductionClass.BUSINESS }?.id
@@ -270,7 +274,7 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
                                 else onOpenTrip(row.id)
                             },
                             onLongClick = { vm.toggleSelection(row.id) },
-                            onDelete = { vm.delete(listOf(row.id)) }
+                            onDelete = { confirmDeleteTrip = row.id }
                         )
                     }
                 } else {
@@ -320,7 +324,7 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
                     BulkAction("Classify") { showBulkPurpose = true }
                     BulkAction("Merge") { vm.merge(selection.toList()) }
                     BulkAction("Add tags") { showTagDialog = true }
-                    BulkAction("Delete") { vm.delete(selection.toList()) }
+                    BulkAction("Delete") { confirmDeleteSelection = true }
                 }
             }
         }
@@ -380,6 +384,21 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
         )
     }
 
+    confirmDeleteTrip?.let { id ->
+        ConfirmDelete(
+            what = "this trip",
+            onConfirm = { vm.delete(listOf(id)); confirmDeleteTrip = null },
+            onDismiss = { confirmDeleteTrip = null }
+        )
+    }
+    if (confirmDeleteSelection) {
+        ConfirmDelete(
+            what = "${selection.size} trip${if (selection.size == 1) "" else "s"}",
+            onConfirm = { vm.delete(selection.toList()); confirmDeleteSelection = false },
+            onDismiss = { confirmDeleteSelection = false }
+        )
+    }
+
     LaunchedEffect(undo) {
         if (undo.isNotEmpty()) {
             kotlinx.coroutines.delay(6000)
@@ -394,7 +413,23 @@ private fun BulkAction(label: String, onClick: () -> Unit) {
         label,
         style = MaterialTheme.typography.titleMedium,
         color = Color.White,
-        modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 8.dp)
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 12.dp)
+    )
+}
+
+/** Deleting a trip removes deductible miles, so it always asks first. */
+@Composable
+fun ConfirmDelete(what: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        title = { Text("Delete $what?", color = TextHi) },
+        text = { Text("This cannot be undone.", color = TextMid) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = Spend) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep it") } }
     )
 }
 
@@ -422,34 +457,7 @@ private fun SwipeTripCard(
 
     SwipeToDismissBox(
         state = state,
-        backgroundContent = {
-            Row(
-                Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        when (state.dismissDirection) {
-                            SwipeToDismissBoxValue.StartToEnd -> Blue
-                            SwipeToDismissBoxValue.EndToStart -> Sky
-                            else -> Color.Transparent
-                        }
-                    )
-                    .padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Work, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("WORK", style = MaterialTheme.typography.labelLarge, color = Color.White)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("PERSONAL", style = MaterialTheme.typography.labelLarge, color = Color.White)
-                    Spacer(Modifier.width(8.dp))
-                    Icon(Icons.Filled.Home, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
+        backgroundContent = { SwipeBackdrop(state.dismissDirection) }
     ) {
         TripCard(row, selected, selectionMode, onClick, onLongClick, onDelete)
     }
@@ -471,7 +479,11 @@ private fun TripCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(if (selected) CardHigh else Card)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClickLabel = "Select trips",
+                onLongClick = onLongClick
+            )
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -525,17 +537,30 @@ private fun TripCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row {
-                Icon(Icons.Filled.Map, null, tint = TextMid, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Filled.Map,
+                    if (points.isNotEmpty()) "Has a recorded route" else null,
+                    tint = if (points.isNotEmpty()) Blue else TextMid,
+                    modifier = Modifier.size(20.dp)
+                )
                 Spacer(Modifier.width(18.dp))
-                Icon(Icons.Filled.Notes, null, tint = TextMid, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Filled.Notes,
+                    if (row.notes.isNotBlank()) "Has a note" else null,
+                    tint = if (row.notes.isNotBlank()) Blue else TextMid,
+                    modifier = Modifier.size(20.dp)
+                )
                 Spacer(Modifier.width(18.dp))
-                Icon(Icons.Filled.DirectionsCar, null, tint = TextMid, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Filled.DirectionsCar,
+                    row.vehicleName?.let { "Vehicle: $it" },
+                    tint = TextMid,
+                    modifier = Modifier.size(20.dp)
+                )
             }
-            Icon(
-                Icons.Filled.Delete, "Delete",
-                tint = TextMid,
-                modifier = Modifier.size(20.dp).clickable(onClick = onDelete)
-            )
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, "Delete this trip", tint = TextMid, modifier = Modifier.size(22.dp))
+            }
         }
         if (selectionMode) {
             Box(Modifier.fillMaxWidth().height(3.dp).background(if (selected) Blue else Line))

@@ -57,6 +57,7 @@ import com.milelog.export.CsvImport
 import com.milelog.export.Exporter
 import com.milelog.tracking.DriveDetect
 import com.milelog.ui.components.CardTitle
+import com.milelog.ui.components.DatePickerSheet
 import com.milelog.ui.components.Divider
 import com.milelog.ui.components.PurposeSheet
 import com.milelog.ui.components.SectionCard
@@ -168,9 +169,27 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                 CardTitle("Tracking")
                 Spacer(Modifier.height(8.dp))
                 ToggleRow("Automatic drive detection", autoDetect) { on ->
-                    autoDetect = on
-                    prefs.autoDetect = on
-                    if (on) DriveDetect.enable(context) else DriveDetect.disable(context)
+                    if (!on) {
+                        autoDetect = false
+                        prefs.autoDetect = false
+                        DriveDetect.disable(context)
+                        return@ToggleRow
+                    }
+                    // enable() refuses without the physical-activity permission, and this
+                    // screen has no way to ask for it. Turning the switch on regardless
+                    // used to leave the app claiming it was tracking when it was not.
+                    if (DriveDetect.enable(context)) {
+                        autoDetect = true
+                        prefs.autoDetect = true
+                    } else {
+                        autoDetect = false
+                        prefs.autoDetect = false
+                        Toast.makeText(
+                            context,
+                            "Turn this on from the Home screen — it needs to ask for permission first.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
                 ToggleRow("Track during my work hours", scheduleOn) { on ->
                     scheduleOn = on
@@ -393,11 +412,29 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
 
             // ---- IRS rates ----
             SectionCard {
-                CardTitle("IRS mileage rates")
+                CardTitle("IRS mileage rates") {
+                    IconButton(onClick = {
+                        // Default to the year after the last one on file, carrying the
+                        // most recent figures forward for you to correct.
+                        val newest = rates.maxByOrNull { it.toEpochDay }
+                        val nextYear = (newest?.let { LocalDate.ofEpochDay(it.toEpochDay).year }
+                            ?: LocalDate.now().year) + 1
+                        editRate = MileageRate(
+                            label = nextYear.toString(),
+                            fromEpochDay = LocalDate.of(nextYear, 1, 1).toEpochDay(),
+                            toEpochDay = LocalDate.of(nextYear, 12, 31).toEpochDay(),
+                            businessCents = newest?.businessCents ?: 0.0,
+                            medicalCents = newest?.medicalCents ?: 0.0,
+                            charityCents = newest?.charityCents ?: 14.0,
+                            movingCents = newest?.movingCents ?: 0.0
+                        )
+                    }) { Icon(Icons.Filled.Add, "Add a rate period", tint = Blue) }
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "2026 has two rows because the business rate went from 72.5 to 76 cents on July 1st. " +
-                        "Edit these when the IRS changes them.",
+                    "2026 has two rows because the business rate went from 72.5 to 76 cents on " +
+                        "July 1st. Add a row each January when the IRS publishes the new rate — " +
+                        "without one, the newest rate here is used and your figures will be wrong.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextMid
                 )
@@ -405,11 +442,35 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                 rates.forEach { r ->
                     Row(
                         Modifier.fillMaxWidth().clickable { editRate = r }.padding(vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(r.label, color = TextHi)
+                        Column(Modifier.weight(1f)) {
+                            Text(r.label, color = TextHi)
+                            Text(
+                                "${Fmt.date(r.fromEpochDay)} to ${Fmt.date(r.toEpochDay)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextMid
+                            )
+                        }
                         Text("${r.businessCents} cents", color = Blue)
+                        Spacer(Modifier.width(12.dp))
+                        Icon(
+                            Icons.Filled.Delete, "Remove this rate period",
+                            tint = TextMid,
+                            modifier = Modifier.size(20.dp).clickable { vm.deleteRate(r) }
+                        )
                     }
+                }
+                val lastCovered = rates.maxByOrNull { it.toEpochDay }?.toEpochDay
+                if (lastCovered != null && lastCovered < LocalDate.now().toEpochDay()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Today is past the last rate on file, so miles are being priced at " +
+                            "the newest rate here. Add the current year to get real numbers.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Warn
+                    )
                 }
             }
 
@@ -871,39 +932,85 @@ private fun PurposeDialog(purpose: Purpose, onSave: (Purpose) -> Unit, onDismiss
 
 @Composable
 private fun RateDialog(rate: MileageRate, onSave: (MileageRate) -> Unit, onDismiss: () -> Unit) {
+    var label by remember { mutableStateOf(rate.label) }
+    var from by remember { mutableStateOf(LocalDate.ofEpochDay(rate.fromEpochDay)) }
+    var to by remember { mutableStateOf(LocalDate.ofEpochDay(rate.toEpochDay)) }
     var business by remember { mutableStateOf(rate.businessCents.toString()) }
     var medical by remember { mutableStateOf(rate.medicalCents.toString()) }
     var charity by remember { mutableStateOf(rate.charityCents.toString()) }
+    var moving by remember { mutableStateOf(rate.movingCents.toString()) }
+    var showFrom by remember { mutableStateOf(false) }
+    var showTo by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Card,
-        title = { Text(rate.label, color = TextHi) },
+        title = { Text(if (rate.id == 0L) "Add a rate period" else rate.label, color = TextHi) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "${Fmt.date(rate.fromEpochDay)} through ${Fmt.date(rate.toEpochDay)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextMid
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Name, e.g. 2027 or 2027 Jan-Jun") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Row(
+                    Modifier.fillMaxWidth().clickable { showFrom = true }.padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Starts", color = TextMid)
+                    Text(Fmt.date(from.toEpochDay()), color = Blue)
+                }
+                Row(
+                    Modifier.fillMaxWidth().clickable { showTo = true }.padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Ends", color = TextMid)
+                    Text(Fmt.date(to.toEpochDay()), color = Blue)
+                }
                 CentsField("Business", business) { business = it }
                 CentsField("Medical", medical) { medical = it }
                 CentsField("Charity", charity) { charity = it }
+                CentsField("Moving", moving) { moving = it }
+                Text(
+                    "Split a year into two rows when the IRS changes the rate mid-year, " +
+                        "the way 2026 changed on July 1st.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMid
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onSave(
-                    rate.copy(
-                        businessCents = business.toDoubleOrNull() ?: rate.businessCents,
-                        medicalCents = medical.toDoubleOrNull() ?: rate.medicalCents,
-                        charityCents = charity.toDoubleOrNull() ?: rate.charityCents,
-                        movingCents = medical.toDoubleOrNull() ?: rate.movingCents
+            TextButton(
+                enabled = label.isNotBlank() && !to.isBefore(from),
+                onClick = {
+                    onSave(
+                        rate.copy(
+                            label = label.trim(),
+                            fromEpochDay = from.toEpochDay(),
+                            toEpochDay = to.toEpochDay(),
+                            businessCents = business.toDoubleOrNull() ?: rate.businessCents,
+                            medicalCents = medical.toDoubleOrNull() ?: rate.medicalCents,
+                            charityCents = charity.toDoubleOrNull() ?: rate.charityCents,
+                            movingCents = moving.toDoubleOrNull() ?: rate.movingCents
+                        )
                     )
-                )
-            }) { Text("Save") }
+                }
+            ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+
+    if (showFrom) {
+        DatePickerSheet(initial = from, onPick = { from = it }, onDismiss = { showFrom = false })
+    }
+    if (showTo) {
+        DatePickerSheet(initial = to, onPick = { to = it }, onDismiss = { showTo = false })
+    }
 }
 
 @Composable

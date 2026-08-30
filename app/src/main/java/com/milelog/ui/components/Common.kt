@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -20,11 +21,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,12 +40,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.milelog.ui.theme.Blue
 import com.milelog.ui.theme.Card as CardColor
 import com.milelog.ui.theme.CardHigh
 import com.milelog.ui.theme.Line
+import com.milelog.ui.theme.Personal
 import com.milelog.ui.theme.TextHi
 import com.milelog.ui.theme.TextLow
 import com.milelog.ui.theme.TextMid
@@ -80,7 +88,7 @@ fun DropdownLabel(text: String, onClick: () -> Unit) {
         Modifier
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text, style = MaterialTheme.typography.titleMedium, color = TextMid)
@@ -91,7 +99,13 @@ fun DropdownLabel(text: String, onClick: () -> Unit) {
 @Composable
 fun BigStat(value: String, label: String, color: Color = Blue, modifier: Modifier = Modifier) {
     Column(modifier) {
-        Text(value, style = MaterialTheme.typography.displaySmall, color = color, maxLines = 1)
+        Text(
+            value,
+            style = MaterialTheme.typography.displaySmall,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelMedium,
@@ -119,11 +133,16 @@ fun LegendRow(value: String, label: String, dot: Color) {
 fun Donut(
     slices: List<Pair<Color, Double>>,
     modifier: Modifier = Modifier.size(140.dp),
-    strokeWidth: Float = 46f
+    strokeWidth: Float = 46f,
+    description: String? = null
 ) {
     val total = slices.sumOf { it.second }
     val progress by animateFloatAsState(if (total > 0) 1f else 0f, label = "donut")
-    Canvas(modifier) {
+    Canvas(
+        if (description != null) {
+            modifier.semantics { contentDescription = description }
+        } else modifier
+    ) {
         val stroke = Stroke(width = strokeWidth)
         val inset = strokeWidth / 2
         val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
@@ -135,12 +154,18 @@ fun Donut(
             )
             return@Canvas
         }
+        // A small gap between slices. Four hues cannot all be 3:1 apart from each other,
+        // so the boundary is drawn rather than left to colour alone.
+        val gap = 3f
         var start = -90f
         slices.forEach { (color, value) ->
             if (value <= 0.0) return@forEach
             val sweep = (value / total * 360.0).toFloat() * progress
             drawArc(
-                color = color, startAngle = start, sweepAngle = sweep, useCenter = false,
+                color = color,
+                startAngle = start + gap / 2,
+                sweepAngle = (sweep - gap).coerceAtLeast(0.5f),
+                useCenter = false,
                 topLeft = topLeft, size = arcSize, style = stroke
             )
             start += sweep
@@ -173,9 +198,13 @@ fun Pill(
     }
 }
 
+/**
+ * [color] tints the background; [textColor] defaults to a darker shade of it because the
+ * accent itself is not readable on its own 18% tint.
+ */
 @Composable
-fun Tag(text: String, color: Color = Blue) {
-    Surface(color = color.copy(alpha = 0.18f), contentColor = color, shape = RoundedCornerShape(6.dp)) {
+fun Tag(text: String, color: Color = Blue, textColor: Color = TextHi) {
+    Surface(color = color.copy(alpha = 0.18f), contentColor = textColor, shape = RoundedCornerShape(6.dp)) {
         Text(
             text.uppercase(),
             style = MaterialTheme.typography.labelSmall,
@@ -195,7 +224,45 @@ fun EmptyNote(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,
-        color = TextLow,
+        color = TextMid,
         modifier = Modifier.padding(vertical = 24.dp)
     )
+}
+
+/**
+ * What shows behind a card as it is dragged. Work and personal are a different hue from
+ * each other rather than two blues, and only the side being swiped is labelled, so there
+ * is no guessing which way the release will file it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeBackdrop(direction: SwipeToDismissBoxValue) {
+    val toWork = direction == SwipeToDismissBoxValue.StartToEnd
+    val fill = when (direction) {
+        SwipeToDismissBoxValue.StartToEnd -> Blue
+        SwipeToDismissBoxValue.EndToStart -> Personal
+        else -> Color.Transparent
+    }
+    Row(
+        Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(18.dp))
+            .background(fill)
+            .padding(horizontal = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (toWork) Arrangement.Start else Arrangement.End
+    ) {
+        if (direction == SwipeToDismissBoxValue.Settled) return@Row
+        val label = if (toWork) "WORK" else "PERSONAL"
+        val icon = if (toWork) Icons.Filled.Work else Icons.Filled.Home
+        if (toWork) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+        }
+        Text(label, style = MaterialTheme.typography.titleMedium, color = Color.White)
+        if (!toWork) {
+            Spacer(Modifier.width(10.dp))
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+    }
 }

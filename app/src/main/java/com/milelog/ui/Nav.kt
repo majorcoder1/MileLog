@@ -2,6 +2,7 @@ package com.milelog.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,12 +32,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.milelog.ui.theme.Blue
 import com.milelog.ui.theme.Card
 import com.milelog.ui.theme.Line
-import com.milelog.ui.theme.TextLow
+import com.milelog.ui.theme.TextMid
 
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     HOME("home", "Home", Icons.Filled.Home),
@@ -105,25 +109,32 @@ private fun BarItem(
     val selected = tab == current
     Column(
         modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (badge > 0) {
+                    "${tab.label}, $badge unclassified"
+                } else tab.label
+            }
+            .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         BadgedBox(badge = {
-            if (badge > 0) Badge { Text(badge.coerceAtMost(99).toString()) }
+            if (badge > 0) Badge { Text(if (badge > 99) "99+" else badge.toString()) }
         }) {
+            // The label below already names it; describing the icon too makes a
+            // screen reader say every tab twice.
             Icon(
                 tab.icon,
-                contentDescription = tab.label,
-                tint = if (selected) Blue else TextLow,
+                contentDescription = null,
+                tint = if (selected) Blue else TextMid,
                 modifier = Modifier.size(24.dp)
             )
         }
         Text(
             tab.label,
             style = MaterialTheme.typography.labelSmall,
-            color = if (selected) Blue else TextLow,
+            color = if (selected) Blue else TextMid,
             maxLines = 1
         )
     }

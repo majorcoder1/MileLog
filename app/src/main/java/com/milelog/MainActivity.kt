@@ -23,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -79,9 +80,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MileLogTheme {
-                var tab by remember { mutableStateOf(startTab()) }
+                var tab by rememberSaveable { mutableStateOf(startTab()) }
                 var overlay by remember { mutableStateOf<Overlay>(Overlay.None) }
-                var addOpen by remember { mutableStateOf(false) }
+                var addOpen by rememberSaveable { mutableStateOf(false) }
                 val live by TripTracker.state.collectAsState()
                 val unclassified by homeVm.unclassifiedCount.collectAsState()
 
