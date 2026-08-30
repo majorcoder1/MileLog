@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- road -->
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M40,86 L48,24 L60,24 L68,86 Z" />
+    <!-- center dashes -->
+    <path android:fillColor="#E8F0FF" android:pathData="M52.2,30 h3.6 v9 h-3.6 z" />
+    <path android:fillColor="#E8F0FF" android:pathData="M52.2,45 h3.6 v11 h-3.6 z" />
+    <path android:fillColor="#E8F0FF" android:pathData="M52.2,62 h3.6 v13 h-3.6 z" />
+    <!-- location pin -->
+    <path
+        android:fillColor="#7DD3FC"
+        android:pathData="M74,22 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0 Z" />
+    <path
+        android:fillColor="#7DD3FC"
+        android:pathData="M74,40 L66.5,26 L81.5,26 Z" />
+    <path
+        android:fillColor="#0B1220"
+        android:pathData="M74,22 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0 Z" />
+</vector>
