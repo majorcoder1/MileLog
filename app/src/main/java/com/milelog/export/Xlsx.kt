@@ -40,11 +40,15 @@ object Xlsx {
         file.outputStream().use { write(it, sheets) }
     }
 
-    fun write(out: OutputStream, sheets: List<Sheet>) {
+    fun write(out: OutputStream, requested: List<Sheet>) {
+        // Excel will not open a workbook with no worksheet in it, so an empty request
+        // gets one blank sheet rather than a file that cannot be opened.
+        val sheets = requested.ifEmpty { listOf(Sheet("Sheet1")) }
+        val names = safeSheetNames(sheets)
         ZipOutputStream(out).use { zip ->
             zip.entry("[Content_Types].xml", contentTypes(sheets.size))
             zip.entry("_rels/.rels", ROOT_RELS)
-            zip.entry("xl/workbook.xml", workbook(sheets))
+            zip.entry("xl/workbook.xml", workbook(names))
             zip.entry("xl/_rels/workbook.xml.rels", workbookRels(sheets.size))
             zip.entry("xl/styles.xml", STYLES)
             sheets.forEachIndexed { i, sheet ->
@@ -70,8 +74,40 @@ object Xlsx {
                 // Control characters are illegal in XML; drop them rather than write a broken file.
                 c.code < 0x20 && c != '\t' && c != '\n' && c != '\r' -> Unit
                 c.code == 0x7F -> Unit
+                // Illegal in XML at any position; one of these makes the whole
+                // workbook unreadable, not just the cell it sits in.
+                c.code == 0xFFFE || c.code == 0xFFFF -> Unit
+                c.isSurrogate() -> Unit
                 else -> append(c)
             }
+        }
+    }
+
+    /** Excel refuses a workbook holding a cell longer than this. */
+    private const val MAX_CELL_CHARS = 32767
+
+    private val FORBIDDEN_IN_SHEET_NAME = charArrayOf(':', '\\', '/', '?', '*', '[', ']')
+
+    /**
+     * Sheet names Excel will accept: the characters it forbids removed, trimmed to 31,
+     * never blank, and never repeated within one workbook.
+     */
+    private fun safeSheetNames(sheets: List<Sheet>): List<String> {
+        val used = mutableSetOf<String>()
+        return sheets.mapIndexed { index, sheet ->
+            val cleaned = sheet.name
+                .filterNot { it in FORBIDDEN_IN_SHEET_NAME }
+                .trim()
+                .take(31)
+                .ifBlank { "Sheet${index + 1}" }
+            var candidate = cleaned
+            var n = 2
+            while (!used.add(candidate.lowercase())) {
+                val suffix = " ($n)"
+                candidate = cleaned.take(31 - suffix.length) + suffix
+                n++
+            }
+            candidate
         }
     }
 
@@ -111,10 +147,15 @@ object Xlsx {
                     is Cell.Text ->
                         if (cell.value.isNotEmpty()) {
                             append("""<c r="$ref" s="${cell.style}" t="inlineStr"><is><t xml:space="preserve">""")
-                            append(esc(cell.value))
+                            append(esc(cell.value.take(MAX_CELL_CHARS)))
                             append("""</t></is></c>""")
                         }
-                    is Cell.Num -> append("""<c r="$ref" s="${cell.style}"><v>${cell.value}</v></c>""")
+                    is Cell.Num ->
+                        // NaN and Infinity are not numbers Excel can hold; skip the cell
+                        // rather than write something that makes it repair the file.
+                        if (cell.value.isFinite()) {
+                            append("""<c r="$ref" s="${cell.style}"><v>${cell.value}</v></c>""")
+                        }
                     is Cell.Day -> append("""<c r="$ref" s="${cell.style}"><v>${excelSerial(cell.epochDay)}</v></c>""")
                 }
             }
@@ -123,12 +164,12 @@ object Xlsx {
         append("</sheetData></worksheet>")
     }
 
-    private fun workbook(sheets: List<Sheet>): String = buildString {
+    private fun workbook(names: List<String>): String = buildString {
         append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""")
         append("""<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" """)
         append("""xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>""")
-        sheets.forEachIndexed { i, s ->
-            append("""<sheet name="${esc(s.name.take(31))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>""")
+        names.forEachIndexed { i, name ->
+            append("""<sheet name="${esc(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>""")
         }
         append("</sheets></workbook>")
     }

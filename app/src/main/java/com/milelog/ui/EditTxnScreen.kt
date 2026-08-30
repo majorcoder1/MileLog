@@ -93,11 +93,12 @@ fun EditTxnScreen(
     var pendingPhoto by remember { mutableStateOf<Pair<Uri, File>?>(null) }
 
     LaunchedEffect(id, type) { vm.load(id, type) }
+    // Reseed whenever a different record loads. The old guard was "only if the box is
+    // empty", which meant opening a second expense kept the first one's amount on screen
+    // — and any edit then saved that number onto the wrong record.
     LaunchedEffect(txn?.id) {
         val cents = txn?.amountCents ?: 0
-        if (cents > 0 && amountText.isEmpty()) {
-            amountText = String.format(java.util.Locale.US, "%.2f", cents / 100.0)
-        }
+        amountText = if (cents > 0) String.format(java.util.Locale.US, "%.2f", cents / 100.0) else ""
     }
 
     val focusManager = LocalFocusManager.current

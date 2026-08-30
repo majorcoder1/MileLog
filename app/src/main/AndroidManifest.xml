@@ -16,10 +16,16 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!--
+      Cloud backup is deliberately off. The database holds the recorded GPS route of
+      every trip, and Android's Auto Backup would copy that into the user's Google
+      account. The tradeoff is that a new phone does not restore by itself: the daily
+      backup file in Settings is the way back, and it never leaves the phone unless
+      the user sends it somewhere.
+    -->
     <application
         android:name=".MileLogApp"
-        android:allowBackup="true"
-        android:fullBackupContent="@xml/backup_rules"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"

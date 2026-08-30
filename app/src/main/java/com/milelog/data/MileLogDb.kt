@@ -14,7 +14,8 @@ import java.time.LocalDate
         ServiceReminder::class
     ],
     version = 1,
-    exportSchema = false
+    // Exported so a future version can be migrated onto rather than dropped.
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class MileLogDb : RoomDatabase() {

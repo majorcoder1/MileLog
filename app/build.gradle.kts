@@ -33,8 +33,8 @@ android {
         applicationId = "com.milelog"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 5
+        versionName = "1.4"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -71,6 +71,9 @@ android {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
     }
     buildFeatures { compose = true }
+
+    // Room writes the schema here so migrations can be written against a real v1.
+    ksp { arg("room.schemaLocation", "$projectDir/schemas") }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }

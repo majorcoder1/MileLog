@@ -74,6 +74,16 @@ object CsvImport {
     private val TXN_TYPE = listOf("type", "transactiontype", "kind", "direction")
 
     /** Header text down to letters and digits, so "Start Location" and "start_location" match. */
+    /** Spacing given to same-day rows that carry no clock time. */
+    private const val ROW_SPACING_MINUTES = 2L
+
+    /**
+     * How close in time two trips of the same length must be to count as the same trip.
+     * Row spacing is deliberately wider than this, so distinct rows never collide while
+     * re-importing the same file still lines up exactly.
+     */
+    private const val DUPLICATE_WINDOW_MS = 60_000L
+
     private fun normalise(header: String): String =
         header.lowercase(Locale.US).filter { it.isLetterOrDigit() }
 
@@ -97,27 +107,41 @@ object CsvImport {
         return rawHeaders to rows
     }
 
-    /** Splits CSV text into records, honouring quotes and newlines inside quoted fields. */
+    /**
+     * Splits CSV text into records, honouring quotes and newlines inside quoted fields.
+     *
+     * A double quote only opens a quoted field when it is the first character of that
+     * field. Anywhere else it is literal text — a merchant called `Lowes 5" pipe` used to
+     * flip the parser into quoted mode and swallow the rest of the file in silence.
+     */
     internal fun splitRecords(text: String): List<List<String>> {
         val records = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
         val field = StringBuilder()
         var inQuotes = false
+        var atFieldStart = true
         var i = 0
+
+        fun endField() {
+            row.add(field.toString()); field.clear(); atFieldStart = true
+        }
+
         while (i < text.length) {
             val c = text[i]
             when {
-                inQuotes && c == '"' && i + 1 < text.length && text[i + 1] == '"' -> {
-                    field.append('"'); i++
+                inQuotes -> when {
+                    c == '"' && i + 1 < text.length && text[i + 1] == '"' -> { field.append('"'); i++ }
+                    c == '"' -> inQuotes = false
+                    else -> field.append(c)
                 }
-                c == '"' -> inQuotes = !inQuotes
-                !inQuotes && c == ',' -> { row.add(field.toString()); field.clear() }
-                !inQuotes && (c == '\n' || c == '\r') -> {
+                c == '"' && atFieldStart -> { inQuotes = true; atFieldStart = false }
+                c == ',' -> endField()
+                c == '\n' || c == '\r' -> {
                     if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++
-                    row.add(field.toString()); field.clear()
+                    endField()
                     records.add(row); row = mutableListOf()
                 }
-                else -> field.append(c)
+                else -> { field.append(c); atFieldStart = false }
             }
             i++
         }
@@ -168,19 +192,64 @@ object CsvImport {
         return null
     }
 
-    /** "$1,234.56", "(12.34)" and "-12.34" all come back as cents. */
+    /**
+     * "$1,234.56", "(12.34)", "-12.34", "12.34-" and the comma-decimal "1.234,56" all
+     * come back as cents. Anything that is not purely an amount — "Order 12 - $3.50" —
+     * comes back null. A skipped row the user is told about beats a made-up number on a
+     * tax return.
+     */
     fun parseCents(raw: String?): Long? {
-        val v = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val negative = v.startsWith("(") && v.endsWith(")") || v.startsWith("-")
-        val digits = v.filter { it.isDigit() || it == '.' }
-        val amount = digits.toDoubleOrNull() ?: return null
+        var v = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (v.any { it.isLetter() }) return null
+
+        var negative = false
+        if (v.startsWith("(") && v.endsWith(")")) {
+            negative = true
+            v = v.substring(1, v.length - 1).trim()
+        }
+        if (v.startsWith("-")) { negative = true; v = v.removePrefix("-").trim() }
+        if (v.endsWith("-")) { negative = true; v = v.removeSuffix("-").trim() }
+
+        v = v.filter { it.isDigit() || it == '.' || it == ',' }
+        if (v.isEmpty()) return null
+
+        val plain = normaliseDecimal(v) ?: return null
+        val amount = plain.toDoubleOrNull() ?: return null
         val cents = Math.round(amount * 100)
         return if (negative) -cents else cents
     }
 
+    /**
+     * Works out which of . and , is the decimal mark and which is grouping, or gives up.
+     * The last separator wins, provided what follows it looks like a fraction.
+     */
+    private fun normaliseDecimal(v: String): String? {
+        val lastDot = v.lastIndexOf('.')
+        val lastComma = v.lastIndexOf(',')
+        val lastSeparator = maxOf(lastDot, lastComma)
+        if (lastSeparator < 0) return v
+
+        val decimalMark = if (lastComma > lastDot) ',' else '.'
+        // The decimal mark can only appear once. "1.2.3" is not an amount.
+        if (v.count { it == decimalMark } > 1) return null
+
+        val fraction = v.substring(lastSeparator + 1)
+        val looksLikeFraction = fraction.length in 1..2 && fraction.all { it.isDigit() }
+        // Otherwise every separator was grouping: "1,234" is twelve hundred, not 12.34.
+        if (!looksLikeFraction) return v.filter { it.isDigit() }
+
+        val whole = v.substring(0, lastSeparator).filter { it.isDigit() }
+        return "$whole.$fraction"
+    }
+
+    /** "23.7 mi" is 23.7. Anything that is not a number after the unit is dropped. */
     fun parseMiles(raw: String?): Double? {
         val v = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return v.filter { it.isDigit() || it == '.' }.toDoubleOrNull()
+        val cleaned = v
+            .replace(Regex("(?i)\\s*(miles|mile|mi|km)\\.?$"), "")
+            .replace(",", "")
+            .trim()
+        return cleaned.toDoubleOrNull()
     }
 
     fun detectKind(headers: List<String>): Kind {
@@ -189,6 +258,9 @@ object CsvImport {
         val hasMoney = AMOUNT.any { it in h }
         val hasMerchant = MERCHANT.any { it in h }
         return when {
+            // A file with both a merchant and an amount is a transactions export, even
+            // when it also carries a mileage column. Reading it as trips loses the money.
+            hasMerchant && hasMoney -> Kind.TRANSACTIONS
             hasMiles -> Kind.TRIPS
             hasMerchant || hasMoney -> Kind.TRANSACTIONS
             else -> Kind.UNKNOWN
@@ -222,6 +294,7 @@ object CsvImport {
         var skipped = 0
         var first: Long? = null
         var last: Long? = null
+        val rowsSeenOnDay = mutableMapOf<Long, Int>()
 
         for (row in rows) {
             val date = parseDate(row.first(*DATE.toTypedArray()))
@@ -233,8 +306,9 @@ object CsvImport {
             if (kind == Kind.TRIPS) {
                 val m = parseMiles(row.first(*MILES.toTypedArray()))
                 if (m == null || m <= 0) { skipped++; continue }
-                val start = startMillis(date, row)
-                if (repo.trips.countMatching(start - 12 * 3600_000L, start + 12 * 3600_000L, m) > 0) {
+                val sequence = rowsSeenOnDay.merge(day, 1, Int::plus)!! - 1
+                val start = startMillis(date, row, sequence)
+                if (repo.trips.countMatching(start - DUPLICATE_WINDOW_MS, start + DUPLICATE_WINDOW_MS, m) > 0) {
                     duplicates++; continue
                 }
                 miles += m
@@ -311,6 +385,7 @@ object CsvImport {
         var trips = 0
         var txns = 0
         var skipped = 0
+        val rowsSeenOnDay = mutableMapOf<Long, Int>()
 
         for (row in rows) {
             val date = parseDate(row.first(*DATE.toTypedArray()))
@@ -320,8 +395,9 @@ object CsvImport {
             if (kind == Kind.TRIPS) {
                 val m = parseMiles(row.first(*MILES.toTypedArray()))
                 if (m == null || m <= 0) { skipped++; continue }
-                val start = startMillis(date, row)
-                if (repo.trips.countMatching(start - 12 * 3600_000L, start + 12 * 3600_000L, m) > 0) {
+                val sequence = rowsSeenOnDay.merge(day, 1, Int::plus)!! - 1
+                val start = startMillis(date, row, sequence)
+                if (repo.trips.countMatching(start - DUPLICATE_WINDOW_MS, start + DUPLICATE_WINDOW_MS, m) > 0) {
                     skipped++; continue
                 }
                 val endTime = parseTime(row.first(*END_TIME.toTypedArray()))
@@ -374,10 +450,15 @@ object CsvImport {
         return Result(trips, txns, skipped)
     }
 
-    private fun startMillis(date: LocalDate, row: Row): Long {
+    /**
+     * When the file carries no clock time, rows are spaced through the day in the order
+     * they appear rather than all stamped noon. Two genuine three-mile runs on the same
+     * day then look like what they are — two trips — instead of one duplicate.
+     */
+    internal fun startMillis(date: LocalDate, row: Row, sequence: Int = 0): Long {
         val time = parseTime(row.first(*START_TIME.toTypedArray()))
             ?: parseTime(row.first(*DATE.toTypedArray()))
-            ?: LocalTime.NOON
+            ?: LocalTime.of(8, 0).plusMinutes(sequence * ROW_SPACING_MINUTES)
         return date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 

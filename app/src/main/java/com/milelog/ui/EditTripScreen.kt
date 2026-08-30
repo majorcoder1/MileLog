@@ -78,11 +78,13 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
     var endOdo by remember { mutableStateOf("") }
 
     LaunchedEffect(id) { vm.load(id) }
+    // Reseed on every record change, so the previous trip's mileage and odometer
+    // readings can never be carried onto this one.
     LaunchedEffect(trip?.id) {
         trip?.let { t ->
-            if (milesText.isEmpty() && t.miles > 0) milesText = String.format(java.util.Locale.US, "%.1f", t.miles)
-            if (startOdo.isEmpty()) startOdo = t.startOdometer?.let { it.toString() } ?: ""
-            if (endOdo.isEmpty()) endOdo = t.endOdometer?.let { it.toString() } ?: ""
+            milesText = if (t.miles > 0) String.format(java.util.Locale.US, "%.1f", t.miles) else ""
+            startOdo = t.startOdometer?.toString() ?: ""
+            endOdo = t.endOdometer?.toString() ?: ""
         }
     }
 

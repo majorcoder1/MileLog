@@ -81,3 +81,27 @@ class CsvImportTest {
         )
     }
 }
+
+/** The parsing failures the review found, kept honest. */
+class CsvImportEdgeTest {
+
+    @org.junit.Test
+    fun anUnmatchedQuoteDoesNotSwallowTheRestOfTheFile() {
+        val text = "Date,Merchant,Amount\n" +
+            "03/02/2026,Lowes 5\" pipe,12.34\n" +
+            "03/03/2026,Murphy USA,45.67\n" +
+            "03/04/2026,Pilot,22.10\n"
+        val records = CsvImport.splitRecords(text)
+        org.junit.Assert.assertEquals(4, records.size)
+        org.junit.Assert.assertEquals("Lowes 5\" pipe", records[1][1])
+        org.junit.Assert.assertEquals("Pilot", records[3][1])
+    }
+
+    @org.junit.Test
+    fun properlyQuotedFieldsStillWork() {
+        val text = "A,B\n\"one, two\",\"he said \"\"hi\"\"\"\n"
+        val records = CsvImport.splitRecords(text)
+        org.junit.Assert.assertEquals("one, two", records[1][0])
+        org.junit.Assert.assertEquals("he said \"hi\"", records[1][1])
+    }
+}

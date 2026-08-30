@@ -29,6 +29,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -45,14 +46,20 @@ class TripTrackingService : Service() {
     private val client by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private lateinit var repo: Repo
 
-    private var tripId: Long = 0
-    private var miles = 0.0
-    private var startedAt = 0L
-    private var autoStarted = false
-    private var last: Location? = null
+    // Written on the main thread by onFix, read from IO when a trip is saved, so
+    // every one of these needs to be visible across threads.
+    @Volatile private var tripId: Long = 0
+    @Volatile private var miles = 0.0
+    @Volatile private var startedAt = 0L
+    @Volatile private var autoStarted = false
+    @Volatile private var last: Location? = null
+    /** Guarded by itself. Never iterate it without holding the lock. */
     private val points = mutableListOf<Pair<Double, Double>>()
-    private var stopTimer: Job? = null
-    private var saving = false
+    @Volatile private var stopTimer: Job? = null
+    @Volatile private var saving = false
+    /** Set synchronously, unlike tripId, so a second START cannot slip past the guard. */
+    @Volatile private var starting = false
+    @Volatile private var lastPersistedAt = 0L
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -83,14 +90,25 @@ class TripTrackingService : Service() {
             ACTION_DISCARD -> finish(discard = true)
             ACTION_ARM_STOP -> armStop()
             ACTION_CANCEL_STOP -> { stopTimer?.cancel(); stopTimer = null }
-            else -> if (tripId == 0L) start(false)
+            else -> {
+                // A null action means the system recreated us after killing the process.
+                // Opening a fresh trip here would never be promoted to the foreground, so
+                // it would collect no location and leave an empty row behind. The drive so
+                // far is already on disk; let the next drive-detect event start a real one.
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
-        return START_STICKY
+        // Deliberately not sticky: a resurrected service cannot promote itself, and a
+        // half-alive tracker is worse than none.
+        return START_NOT_STICKY
     }
 
     private fun start(auto: Boolean) {
-        if (tripId != 0L) return
+        if (tripId != 0L || starting) return
+        starting = true
         if (!hasLocationPermission()) {
+            starting = false
             warnCannotTrack()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -118,6 +136,7 @@ class TripTrackingService : Service() {
             )
             tripId = id
             repo.prefs.activeTripId = id
+            starting = false
             TripTracker.set(
                 LiveTrip(active = true, tripId = id, startedAt = startedAt, autoStarted = auto)
             )
@@ -148,13 +167,62 @@ class TripTrackingService : Service() {
             miles += Geo.metersToMiles(meters.toDouble())
         }
         last = loc
-        if (points.isEmpty() || points.size < MAX_POINTS) {
-            points += loc.latitude to loc.longitude
+        val snapshot = synchronized(points) {
+            if (points.size < MAX_POINTS) points += loc.latitude to loc.longitude
+            points.toList()
         }
         TripTracker.update {
-            it.copy(miles = miles, points = points.toList(), lastFixAt = System.currentTimeMillis())
+            it.copy(miles = miles, points = snapshot, lastFixAt = System.currentTimeMillis())
         }
         updateNotification()
+
+        // Write progress to disk regularly. Without this the drive lives only in memory
+        // and the whole thing is lost the moment Android reclaims the process.
+        val now = System.currentTimeMillis()
+        if (now - lastPersistedAt >= PERSIST_EVERY_MS) {
+            lastPersistedAt = now
+            persistProgress(snapshot)
+        }
+    }
+
+    /** Saves how far we have got, so a killed process costs seconds rather than the drive. */
+    private fun persistProgress(snapshot: List<Pair<Double, Double>>) {
+        val id = tripId
+        if (id == 0L) return
+        val current = miles
+        val first = snapshot.firstOrNull()
+        val latest = snapshot.lastOrNull()
+        scope.launch {
+            runCatching {
+                val trip = repo.trips.byId(id) ?: return@launch
+                repo.trips.update(
+                    trip.copy(
+                        endEpoch = System.currentTimeMillis(),
+                        miles = current,
+                        startLat = first?.first ?: trip.startLat,
+                        startLon = first?.second ?: trip.startLon,
+                        endLat = latest?.first,
+                        endLon = latest?.second,
+                        pathCsv = encodePath(snapshot),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }.onFailure { Log.w(TAG, "Could not save progress: ${it.message}") }
+        }
+    }
+
+    /**
+     * Thins the recorded route before storing it. A four-thousand point trace is tens of
+     * kilobytes of text per trip, and every trip list query carries it; a couple of
+     * hundred points draws the same line on a phone-sized map.
+     */
+    private fun encodePath(raw: List<Pair<Double, Double>>): String {
+        if (raw.isEmpty()) return ""
+        val keep = if (raw.size <= STORED_POINTS) raw else {
+            val step = raw.size.toDouble() / STORED_POINTS
+            (0 until STORED_POINTS).map { raw[(it * step).toInt().coerceAtMost(raw.lastIndex)] } + raw.last()
+        }
+        return keep.joinToString(";") { Geo.formatPoint(it.first, it.second) }
     }
 
     /**
@@ -218,9 +286,10 @@ class TripTrackingService : Service() {
         val id = tripId
         val endedAt = System.currentTimeMillis()
         val finalMiles = miles
-        val path = points.joinToString(";") { Geo.formatPoint(it.first, it.second) }
-        val first = points.firstOrNull()
-        val lastPoint = points.lastOrNull()
+        val snapshot = synchronized(points) { points.toList() }
+        val path = encodePath(snapshot)
+        val first = snapshot.firstOrNull()
+        val lastPoint = snapshot.lastOrNull()
 
         scope.launch {
             if (id != 0L) {
@@ -306,6 +375,10 @@ class TripTrackingService : Service() {
 
     override fun onDestroy() {
         runCatching { client.removeLocationUpdates(callback) }
+        stopTimer?.cancel()
+        // The five-minute stop timer and any in-flight save would otherwise outlive the
+        // service and keep a reference to it.
+        scope.cancel()
         super.onDestroy()
     }
 
@@ -321,6 +394,9 @@ class TripTrackingService : Service() {
         private const val NOTIF_ID = 1001
         private const val NOTIF_WARN = 1002
         private const val MAX_POINTS = 4000
+        /** How many route points survive into storage. */
+        private const val STORED_POINTS = 200
+        private const val PERSIST_EVERY_MS = 20_000L
         private const val MIN_MILES = 0.1
         private const val STOP_GRACE_MS = 5 * 60 * 1000L
 

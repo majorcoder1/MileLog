@@ -36,13 +36,21 @@ class MileLogApp : Application() {
     private suspend fun closeOutAbandonedTrip(repo: Repo) {
         val id = repo.prefs.activeTripId
         if (id == 0L) return
-        val trip = repo.trips.byId(id)
-        if (trip != null) {
-            if (trip.miles < 0.1) {
-                repo.trips.delete(trip)
-            } else {
-                repo.trips.update(trip.copy(endEpoch = maxOf(trip.updatedAt, trip.endEpoch)))
-            }
+        val trip = repo.trips.byId(id) ?: run {
+            repo.prefs.activeTripId = 0L
+            return
+        }
+
+        // The tracking service writes progress every twenty seconds. A row touched that
+        // recently belongs to a drive in flight — possibly one starting in this very
+        // process — and must be left alone.
+        if (System.currentTimeMillis() - trip.updatedAt < LIVE_TRIP_GRACE_MS) return
+
+        if (trip.miles < 0.1) {
+            repo.trips.delete(trip)
+        } else {
+            // It has real miles on it. Close it out and keep it.
+            repo.trips.update(trip.copy(endEpoch = maxOf(trip.updatedAt, trip.endEpoch)))
         }
         repo.prefs.activeTripId = 0L
     }
@@ -72,6 +80,9 @@ class MileLogApp : Application() {
     }
 
     companion object {
+        /** A trip row touched inside this window is still being recorded. */
+        private const val LIVE_TRIP_GRACE_MS = 2 * 60 * 1000L
+
         const val CH_TRACKING = "tracking"
         const val CH_ALERTS = "alerts"
     }

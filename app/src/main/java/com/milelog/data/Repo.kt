@@ -1,7 +1,9 @@
 package com.milelog.data
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 /** One rate period's slice of a year's driving. */
@@ -76,10 +78,28 @@ class Repo(context: Context) {
         DeductionClass.PERSONAL -> 0.0
     }
 
-    /** Everything the Taxes tab and the spreadsheet need for one span of days. */
-    suspend fun summarize(range: DayRange): TaxSummary {
+    /**
+     * Everything the Taxes tab and the spreadsheet need for one span of days.
+     *
+     * Runs off the main thread and reads the rate table once. It used to query the rates
+     * once per trip from whatever dispatcher called it, which on a full year meant
+     * thousands of database round trips on the UI thread.
+     */
+    suspend fun summarize(range: DayRange): TaxSummary = withContext(Dispatchers.IO) {
         val tripList = db.trips().listBetween(range.fromMillis, range.toMillis)
         val purposeMap = db.purposes().allNow().associateBy { it.id }
+        val rateTable = db.rates().allNow()
+
+        fun rateOn(day: Long): Pair<MileageRate, Boolean> {
+            rateTable.firstOrNull { day in it.fromEpochDay..it.toEpochDay }?.let { return it to false }
+            val nearest = rateTable.filter { it.toEpochDay <= day }.maxByOrNull { it.toEpochDay }
+                ?: rateTable.minByOrNull { it.fromEpochDay }
+                ?: return MileageRate(
+                    label = "unset", fromEpochDay = day, toEpochDay = day,
+                    businessCents = 0.0, medicalCents = 0.0, charityCents = 0.0, movingCents = 0.0
+                ) to true
+            return nearest to true
+        }
 
         var business = 0.0
         var personal = 0.0
@@ -102,7 +122,7 @@ class Repo(context: Context) {
             if (cls == null || cls == DeductionClass.PERSONAL) continue
 
             val day = Fmt.epochDayOf(t.startEpoch)
-            val (rate, wasEstimated) = rateFor(day)
+            val (rate, wasEstimated) = rateOn(day)
             if (wasEstimated) estimated = true
             val cents = rate.centsFor(cls)
             val key = rate.label to cls
@@ -123,7 +143,7 @@ class Repo(context: Context) {
             }
             .sortedByDescending { it.cents }
 
-        return TaxSummary(
+        TaxSummary(
             range = range,
             totalMiles = tripList.sumOf { it.miles },
             businessMiles = business,
@@ -144,14 +164,14 @@ class Repo(context: Context) {
     }
 
     /** Years that have any trip or transaction in them, newest first. */
-    suspend fun yearsWithData(): List<Int> {
+    suspend fun yearsWithData(): List<Int> = withContext(Dispatchers.IO) {
         val years = sortedSetOf<Int>()
         db.trips().all().forEach {
             years += LocalDate.ofEpochDay(Fmt.epochDayOf(it.startEpoch)).year
         }
         db.txns().all().forEach { years += LocalDate.ofEpochDay(it.dateEpochDay).year }
         years += LocalDate.now().year
-        return years.sortedDescending()
+        years.sortedDescending()
     }
 
     suspend fun defaultVehicleId(): Long? {

@@ -26,9 +26,10 @@ platforms, with a spreadsheet at the end of the year that a tax preparer can rea
 - All records live in a local SQLite database. The only network traffic the app makes is
   fetching OpenStreetMap tiles to draw trip routes, which necessarily tells that server
   roughly where you drove. Turn off the map previews if that matters to you.
-- `allowBackup` is on, so Android copies the database — including recorded GPS routes —
-  into your Google account backup. Set `android:allowBackup="false"` in the manifest if
-  you would rather it did not.
+- Automatic backup is off. The database holds the GPS route of every trip, so neither
+  Google Drive backup nor a phone-to-phone transfer is allowed to copy it. The tradeoff
+  is that a new phone does not restore by itself — Settings writes a daily backup file
+  and can send you a copy, and that is the way back.
 - Automatic tracking needs Location set to "Allow all the time". Without it Android
   refuses to let the app record a drive that starts while the app is closed.
 

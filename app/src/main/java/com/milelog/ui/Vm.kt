@@ -435,6 +435,9 @@ class EditTripVm(app: Application) : BaseVm(app) {
     val trip: StateFlow<Trip?> = _trip
 
     fun load(id: Long) = viewModelScope.launch {
+        // Drop the previous record first. Without this the screen renders the last trip
+        // you opened until the new one arrives, and the form seeds itself from it.
+        _trip.value = null
         _trip.value = if (id > 0) repo.trips.byId(id) else Trip(
             startEpoch = System.currentTimeMillis(),
             endEpoch = System.currentTimeMillis(),
@@ -480,6 +483,7 @@ class EditTxnVm(app: Application) : BaseVm(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun load(id: Long, type: TxnType) = viewModelScope.launch {
+        _txn.value = null
         val loaded = if (id > 0) repo.txns.byId(id) else Txn(
             type = type,
             amountCents = 0,

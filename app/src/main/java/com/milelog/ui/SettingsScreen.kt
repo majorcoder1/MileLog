@@ -54,6 +54,7 @@ import com.milelog.data.Vehicle
 import com.milelog.data.WorkWindow
 import com.milelog.export.Backup
 import com.milelog.export.CsvImport
+import com.milelog.export.Exporter
 import com.milelog.tracking.DriveDetect
 import com.milelog.ui.components.CardTitle
 import com.milelog.ui.components.Divider
@@ -448,8 +449,10 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                     prefs.dailyBackup = on
                 }
                 Text(
-                    "Android also backs this app up to your Google account on its own, so a new " +
-                        "phone gets everything back when you install MileLog again.",
+                    "Nothing goes to Google. Your trips carry the GPS route you actually drove, " +
+                        "so MileLog keeps them off the cloud entirely. That means a new phone will " +
+                        "not restore on its own — send yourself a copy now and again so there is " +
+                        "one somewhere other than this phone.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextMid
                 )
@@ -484,6 +487,24 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                         modifier = Modifier.weight(1f)
                     ) { Text("Restore") }
                 }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val file = withContext(Dispatchers.IO) {
+                                runCatching { Backup.list(context).firstOrNull() ?: Backup.create(context) }
+                            }
+                            file.onSuccess {
+                                context.startActivity(
+                                    Exporter.shareIntent(context, it, "MileLog backup ${it.name}")
+                                )
+                            }.onFailure {
+                                Toast.makeText(context, "No backup to send: ${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Send myself a copy") }
             }
 
             SectionCard {

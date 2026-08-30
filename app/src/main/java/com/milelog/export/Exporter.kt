@@ -258,6 +258,21 @@ object Exporter {
         return Intent.createChooser(intent, "Send with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
+    /**
+     * Hands a backup file to whatever the user picks — mail, Drive, a cable. Cloud
+     * backup is off by design, so this is how a copy gets somewhere safe.
+     */
+    fun shareIntent(context: Context, file: File, subject: String): Intent {
+        val intent = Intent(Intent.ACTION_SEND)
+            .putExtra(Intent.EXTRA_STREAM, uriFor(context, file))
+            .putExtra(Intent.EXTRA_SUBJECT, subject)
+            .setType("application/zip")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val to = Repo.get(context).prefs.exportEmail
+        if (to.isNotBlank()) intent.putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+        return Intent.createChooser(intent, "Send the backup").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
     /** Drops a copy in the phone's Downloads folder so it is easy to find later. */
     fun saveToDownloads(context: Context, file: File): Uri? = runCatching {
         val values = ContentValues().apply {
