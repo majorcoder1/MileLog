@@ -60,10 +60,17 @@ class TripTrackingService : Service() {
     /** Set synchronously, unlike tripId, so a second START cannot slip past the guard. */
     @Volatile private var starting = false
     @Volatile private var lastPersistedAt = 0L
+    // Kept so a short-looking trip can be explained rather than guessed at.
+    @Volatile private var fixesUsed = 0
+    @Volatile private var droppedLegs = 0
+    @Volatile private var droppedMiles = 0.0
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            result.lastLocation?.let { onFix(it) }
+            // Fused location batches fixes when the screen is off. Taking only the newest
+            // one threw the rest of the batch away and measured the whole leg as a single
+            // straight line between two distant points.
+            result.locations.sortedBy { it.time }.forEach { onFix(it) }
         }
     }
 
@@ -119,7 +126,10 @@ class TripTrackingService : Service() {
         autoStarted = auto
         miles = 0.0
         last = null
-        points.clear()
+        fixesUsed = 0
+        droppedLegs = 0
+        droppedMiles = 0.0
+        synchronized(points) { points.clear() }
 
         scope.launch {
             val purposeId = defaultPurposeForNow()
@@ -137,14 +147,19 @@ class TripTrackingService : Service() {
             tripId = id
             repo.prefs.activeTripId = id
             starting = false
+            Log.i(TAG, "Trip $id started, ${if (auto) "detected automatically" else "started by hand"}")
             TripTracker.set(
                 LiveTrip(active = true, tripId = id, startedAt = startedAt, autoStarted = auto)
             )
         }
 
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4000L)
-            .setMinUpdateIntervalMillis(2000L)
-            .setMinUpdateDistanceMeters(8f)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L)
+            .setMinUpdateIntervalMillis(1000L)
+            // No distance filter: a fix every couple of seconds follows a curve, where
+            // one every eight metres of displacement cuts the corners off it.
+            .setMinUpdateDistanceMeters(0f)
+            // Deliver immediately rather than in batches.
+            .setMaxUpdateDelayMillis(0L)
             .setWaitForAccurateLocation(false)
             .build()
         if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
@@ -171,7 +186,15 @@ class TripTrackingService : Service() {
             if (speedMph < STOPPED_MPH && meters < NOISE_METERS) return
 
             if (meters < MIN_SEGMENT_METERS) return
-            if (mph > MAX_PLAUSIBLE_MPH) { last = loc; return }
+            if (seconds >= 1.0 && mph > MAX_PLAUSIBLE_MPH) {
+                // Either a bad fix or a gap in the stream we cannot honestly measure.
+                // Re-anchor, but keep count: this is distance leaving the total.
+                droppedLegs++
+                droppedMiles += Geo.metersToMiles(meters.toDouble())
+                last = loc
+                return
+            }
+            fixesUsed++
             miles += Geo.metersToMiles(meters.toDouble())
         }
         last = loc
@@ -300,6 +323,12 @@ class TripTrackingService : Service() {
         val id = tripId
         val endedAt = System.currentTimeMillis()
         val finalMiles = miles
+        Log.i(
+            TAG,
+            "Trip $id finished: ${"%.2f".format(finalMiles)} mi over " +
+                "${(endedAt - startedAt) / 60000} min, $fixesUsed fixes used, " +
+                "$droppedLegs legs dropped worth ${"%.2f".format(droppedMiles)} mi"
+        )
         val snapshot = synchronized(points) { points.toList() }
         val path = encodePath(snapshot)
         val first = snapshot.firstOrNull()
