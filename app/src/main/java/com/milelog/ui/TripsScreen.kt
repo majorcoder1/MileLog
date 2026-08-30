@@ -586,9 +586,12 @@ private fun AddressLine(text: String, dot: Color, time: String) {
         Text(
             text.ifBlank { "Address not recorded" },
             style = MaterialTheme.typography.bodyMedium,
-            color = if (text.isBlank()) TextLow else TextHi,
+            color = if (text.isBlank()) TextMid else TextHi,
             modifier = Modifier.weight(1f),
-            maxLines = 1
+            // A long street address was being cut off mid-word with no ellipsis, so it
+            // read as if the town had no state after it.
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
         Text(time, style = MaterialTheme.typography.labelMedium, color = TextMid)
     }
