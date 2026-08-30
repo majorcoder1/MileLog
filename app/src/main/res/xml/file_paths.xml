@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Only what actually gets shared: receipt photos and the files the user exports. -->
 <paths>
     <files-path name="receipts" path="receipts/" />
     <files-path name="exports" path="exports/" />
     <files-path name="backups" path="backups/" />
-    <cache-path name="cache" path="." />
-    <external-files-path name="ext" path="." />
 </paths>

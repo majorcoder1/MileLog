@@ -222,10 +222,18 @@ object Exporter {
         return Result(xlsx, csvTrips, csvTxns, summary)
     }
 
-    private fun csvRow(vararg fields: String): String =
-        fields.joinToString(",") { f ->
-            if (f.any { it == ',' || it == '"' || it == '\n' }) "\"${f.replace("\"", "\"\"")}\"" else f
-        }
+    private fun csvRow(vararg fields: String): String = fields.joinToString(",") { csvField(it) }
+
+    /**
+     * Text that starts with =, +, - or @ is run as a formula by Excel, LibreOffice and
+     * Sheets. Merchant names and notes can come straight out of somebody else's export
+     * file, so they are pinned as text before they go anywhere near a spreadsheet.
+     */
+    private fun csvField(field: String): String {
+        val safe = if (field.isNotEmpty() && field.first() in "=+-@\t\r") "'" + field else field
+        val mustQuote = safe.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        return if (mustQuote) "\"" + safe.replace("\"", "\"\"") + "\"" else safe
+    }
 
     fun uriFor(context: Context, file: File): Uri =
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)

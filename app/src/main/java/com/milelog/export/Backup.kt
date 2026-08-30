@@ -1,6 +1,7 @@
 package com.milelog.export
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import com.milelog.data.MileLogDb
 import com.milelog.data.Repo
@@ -67,29 +68,67 @@ object Backup {
      */
     fun restore(context: Context, uri: Uri): Result<Unit> = runCatching {
         val staging = File(context.cacheDir, "restore").apply { deleteRecursively(); mkdirs() }
-        context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Could not open that file." }
-            unzipTo(input, staging)
-        }
-
-        val stagedDb = File(staging, "db/$DB_NAME")
-        require(stagedDb.exists()) { "That file is not a MileLog backup." }
-
-        MileLogDb.reset()
-        Repo.reset()
-
         val dbFile = context.getDatabasePath(DB_NAME)
-        dbFile.parentFile?.mkdirs()
-        listOf("", "-wal", "-shm").forEach { File("${dbFile.path}$it").delete() }
-        stagedDb.copyTo(dbFile, overwrite = true)
-        File(staging, "db/$DB_NAME-wal").takeIf { it.exists() }?.copyTo(File("${dbFile.path}-wal"), overwrite = true)
+        val safety = File(context.cacheDir, "pre-restore-$DB_NAME")
 
-        val receipts = File(context.filesDir, "receipts").apply { mkdirs() }
-        File(staging, "receipts").listFiles()?.forEach { f ->
-            f.copyTo(File(receipts, f.name), overwrite = true)
+        try {
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Could not open that file." }
+                unzipTo(input, staging)
+            }
+
+            val stagedDb = File(staging, "db/$DB_NAME")
+            require(stagedDb.exists()) { "That file is not a MileLog backup." }
+            // Prove it is really one of ours BEFORE anything on the phone is touched.
+            require(holdsMileLogData(stagedDb)) {
+                "That file is not a MileLog backup, or it was written by a newer version."
+            }
+
+            MileLogDb.reset()
+            Repo.reset()
+            dbFile.parentFile?.mkdirs()
+
+            // Keep the current data until the replacement is proven to open.
+            if (dbFile.exists()) dbFile.copyTo(safety, overwrite = true)
+
+            try {
+                listOf("", "-wal", "-shm").forEach { File("${dbFile.path}$it").delete() }
+                stagedDb.copyTo(dbFile, overwrite = true)
+                File(staging, "db/$DB_NAME-wal").takeIf { it.exists() }
+                    ?.copyTo(File("${dbFile.path}-wal"), overwrite = true)
+                require(holdsMileLogData(dbFile)) { "The restored file would not open." }
+            } catch (failure: Exception) {
+                // Put the original back rather than leave him with nothing.
+                if (safety.exists()) {
+                    listOf("", "-wal", "-shm").forEach { File("${dbFile.path}$it").delete() }
+                    safety.copyTo(dbFile, overwrite = true)
+                }
+                MileLogDb.reset()
+                Repo.reset()
+                throw IllegalStateException(
+                    "Restore failed and your data was put back. ${failure.message}", failure
+                )
+            }
+
+            val receipts = File(context.filesDir, "receipts").apply { mkdirs() }
+            File(staging, "receipts").listFiles()?.forEach { f ->
+                f.copyTo(File(receipts, f.name), overwrite = true)
+            }
+        } finally {
+            staging.deleteRecursively()
+            safety.delete()
         }
-        staging.deleteRecursively()
     }
+
+    /** Opens a candidate file read-only and checks it carries the tables we expect. */
+    private fun holdsMileLogData(file: File): Boolean = runCatching {
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('trips','txns','purposes')",
+                null
+            ).use { it.count >= 3 }
+        }
+    }.getOrDefault(false)
 
     private fun unzipTo(input: InputStream, target: File) {
         ZipInputStream(input.buffered()).use { zip ->
