@@ -1,5 +1,6 @@
 package com.milelog.ui
 
+import android.graphics.ImageDecoder
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +72,8 @@ import com.milelog.ui.theme.Spend
 import com.milelog.ui.theme.TextHi
 import com.milelog.ui.theme.TextLow
 import com.milelog.ui.theme.TextMid
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 
@@ -324,30 +328,40 @@ fun FormRow(icon: ImageVector, label: String, value: String?, onClick: () -> Uni
     }
 }
 
-/** Loads a receipt photo at thumbnail size so a big camera JPEG never lands in memory whole. */
+/**
+ * Loads a receipt photo at thumbnail size, the right way up.
+ *
+ * A phone camera does not rotate the pixels when you turn the phone; it writes the
+ * picture as the sensor saw it and records the rotation in an EXIF tag. BitmapFactory
+ * ignores that tag, which is why a receipt shot in portrait came back lying on its side.
+ * ImageDecoder applies it. Decoding also happens off the main thread, since a camera
+ * JPEG is large enough to stutter the screen.
+ */
 @Composable
 fun ReceiptThumb(file: File, modifier: Modifier = Modifier) {
-    val bitmap = remember(file.path, file.lastModified()) {
-        runCatching {
-            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            android.graphics.BitmapFactory.decodeFile(file.path, bounds)
-            val sample = maxOf(1, minOf(bounds.outWidth, bounds.outHeight) / 320)
-            android.graphics.BitmapFactory.decodeFile(
-                file.path,
-                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            )
-        }.getOrNull()
+    val bitmap by produceState<android.graphics.Bitmap?>(null, file.path, file.lastModified()) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+                    decoder.isMutableRequired = false
+                    val smallest = minOf(info.size.width, info.size.height)
+                    decoder.setTargetSampleSize(maxOf(1, smallest / 320))
+                }
+            }.getOrNull()
+        }
     }
-    if (bitmap != null) {
+
+    val shown = bitmap
+    if (shown != null) {
         androidx.compose.foundation.Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = shown.asImageBitmap(),
             contentDescription = "Receipt photo",
             contentScale = ContentScale.Crop,
             modifier = modifier
         )
     } else {
         Box(modifier.background(CardHigh), contentAlignment = Alignment.Center) {
-            Text("Photo missing", style = MaterialTheme.typography.labelSmall, color = TextLow)
+            Text("Photo missing", style = MaterialTheme.typography.labelSmall, color = TextMid)
         }
     }
 }
