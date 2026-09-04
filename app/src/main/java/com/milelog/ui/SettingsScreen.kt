@@ -572,7 +572,19 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
 
             SectionCard {
                 CardTitle("About")
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Version", color = TextMid)
+                    Text(
+                        appVersion(context),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextHi
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
                 Text(
                     "MileLog keeps everything on this phone. No account, no server, nothing " +
                         "leaves unless you send it yourself. Map tiles come from OpenStreetMap.",
@@ -1094,3 +1106,13 @@ private fun displayName(context: android.content.Context, uri: android.net.Uri):
             if (i >= 0 && c.moveToFirst()) c.getString(i) else null
         }
     }.getOrNull() ?: uri.lastPathSegment ?: "the file"
+
+/**
+ * The installed version, read from the package rather than a constant, so it can never
+ * disagree with the APK actually on the phone. Build number included: two builds can
+ * carry the same name while only one of them has the fix in it.
+ */
+private fun appVersion(context: android.content.Context): String = runCatching {
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    "${info.versionName} (build ${info.longVersionCode})"
+}.getOrDefault("unknown")
