@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Work
@@ -212,6 +213,14 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
                 label = { Text("Notes") },
                 leadingIcon = { Icon(Icons.Filled.Notes, null, tint = TextMid) },
                 minLines = 3,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+            )
+            OutlinedTextField(
+                value = current.tags,
+                onValueChange = { v -> vm.edit { it.copy(tags = v) } },
+                label = { Text("Tags, separated by commas") },
+                leadingIcon = { Icon(Icons.Filled.LocalOffer, null, tint = TextMid) },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
             Spacer(Modifier.height(20.dp))
