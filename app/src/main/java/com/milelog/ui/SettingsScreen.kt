@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -128,7 +129,8 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) confirmRestore = uri }
 
-    Column(Modifier.fillMaxSize()) {
+    // Keep the form above the keyboard so the field being typed into is reachable.
+    Column(Modifier.fillMaxSize().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically

@@ -77,6 +77,11 @@ class TripTrackingService : Service() {
     @Volatile private var fixesUsed = 0
     @Volatile private var droppedLegs = 0
     @Volatile private var droppedMiles = 0.0
+    /**
+     * One announcement per driving session, not one per leg. Stop-and-go work splits
+     * into dozens of legs a day and a chime for every one of them would be unusable.
+     */
+    @Volatile private var announcedThisSession = false
 
     private val recording: Boolean get() = tripId != 0L
 
@@ -179,6 +184,11 @@ class TripTrackingService : Service() {
 
         requestUpdates(active = true)
         updateNotification()
+
+        if (auto && !announcedThisSession) {
+            announcedThisSession = true
+            announceDetected()
+        }
     }
 
     /**
@@ -482,6 +492,29 @@ class TripTrackingService : Service() {
         }
     }
 
+    /**
+     * Says out loud that tracking has picked a drive up. The ongoing notification is
+     * deliberately silent, so without this there is nothing to tell you it is working.
+     */
+    private fun announceDetected() {
+        val open = PendingIntent.getActivity(
+            this, 4,
+            Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, "trips"),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, MileLogApp.CH_ALERTS)
+            .setSmallIcon(R.drawable.ic_stat_trip)
+            .setContentTitle("MileLog is recording")
+            .setContentText("Picked up that you are driving. Tap to watch it.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIF_DETECTED, notification)
+        }
+    }
+
     /** Tells the user why nothing got recorded, and takes them to the setting that fixes it. */
     private fun warnCannotTrack() {
         val needsBackground = !DriveDetect.hasBackgroundLocation(this)
@@ -533,6 +566,7 @@ class TripTrackingService : Service() {
         private const val TAG = "MileLogTracking"
         private const val NOTIF_ID = 1001
         private const val NOTIF_WARN = 1002
+        private const val NOTIF_DETECTED = 1003
         private const val MAX_POINTS = 4000
         /** How many route points survive into storage. */
         private const val STORED_POINTS = 200

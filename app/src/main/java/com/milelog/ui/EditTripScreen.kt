@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Work
@@ -44,7 +44,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.milelog.data.Fmt
-import com.milelog.data.TripSource
 import com.milelog.tracking.Geo
 import com.milelog.ui.components.DatePickerSheet
 import com.milelog.ui.components.Divider
@@ -74,8 +73,6 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
     var showStartTime by remember { mutableStateOf(false) }
     var showEndTime by remember { mutableStateOf(false) }
     var milesText by remember { mutableStateOf("") }
-    var startOdo by remember { mutableStateOf("") }
-    var endOdo by remember { mutableStateOf("") }
 
     LaunchedEffect(id) { vm.load(id) }
     // Reseed on every record change, so the previous trip's mileage and odometer
@@ -83,8 +80,6 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
     LaunchedEffect(trip?.id) {
         trip?.let { t ->
             milesText = if (t.miles > 0) String.format(java.util.Locale.US, "%.1f", t.miles) else ""
-            startOdo = t.startOdometer?.toString() ?: ""
-            endOdo = t.endOdometer?.toString() ?: ""
         }
     }
 
@@ -100,7 +95,9 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
         vm.edit { it.copy(startEpoch = newStart, endEpoch = newEnd) }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // imePadding keeps the form above the keyboard, so the field being typed into
+    // can actually be scrolled to instead of sitting underneath it.
+    Column(Modifier.fillMaxSize().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -203,38 +200,6 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                OutlinedTextField(
-                    value = startOdo,
-                    onValueChange = { v ->
-                        startOdo = v.filter { it.isDigit() || it == '.' }
-                        vm.edit { it.copy(startOdometer = startOdo.toDoubleOrNull(), source = TripSource.ODOMETER) }
-                    },
-                    label = { Text("Odometer start") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(12.dp))
-                OutlinedTextField(
-                    value = endOdo,
-                    onValueChange = { v ->
-                        endOdo = v.filter { it.isDigit() || it == '.' }
-                        vm.edit { it.copy(endOdometer = endOdo.toDoubleOrNull(), source = TripSource.ODOMETER) }
-                    },
-                    label = { Text("Odometer end") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Text(
-                "Fill in both odometer boxes and the miles work themselves out.",
-                style = MaterialTheme.typography.labelMedium,
-                color = TextMid,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
-            )
-
             FormRow(
                 Icons.Filled.DirectionsCar,
                 "Vehicle",
@@ -246,14 +211,7 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
                 onValueChange = { v -> vm.edit { it.copy(notes = v) } },
                 label = { Text("Notes") },
                 leadingIcon = { Icon(Icons.Filled.Notes, null, tint = TextMid) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-            )
-            OutlinedTextField(
-                value = current.tags,
-                onValueChange = { v -> vm.edit { it.copy(tags = v) } },
-                label = { Text("Tags, separated by commas") },
-                leadingIcon = { Icon(Icons.Filled.LocalOffer, null, tint = TextMid) },
-                singleLine = true,
+                minLines = 3,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
             Spacer(Modifier.height(20.dp))
