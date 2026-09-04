@@ -86,6 +86,9 @@ object CsvImport {
      */
     private const val DUPLICATE_WINDOW_MS = 60_000L
 
+    /** How far into the file to look for the row that holds the column names. */
+    private const val HEADER_SEARCH_ROWS = 20
+
     private fun normalise(header: String): String =
         header.lowercase(Locale.US).filter { it.isLetterOrDigit() }
 
@@ -96,17 +99,62 @@ object CsvImport {
             ?.toString(Charsets.UTF_8)
             ?: throw IllegalArgumentException("Could not open that file.")
 
-        val lines = splitRecords(text.removePrefix("﻿"))
-        if (lines.isEmpty()) return emptyList<String>() to emptyList()
+        val body = text.trimStart('\uFEFF')
+        val records = splitRecords(body, sniffDelimiter(body))
+        if (records.isEmpty()) return emptyList<String>() to emptyList()
 
-        val rawHeaders = lines.first()
+        val headerAt = headerRowIndex(records)
+        val rawHeaders = records[headerAt]
         val headers = rawHeaders.map { normalise(it) }
-        val rows = lines.drop(1)
+
+        val rows = records.drop(headerAt + 1)
             .filter { cells -> cells.any { it.isNotBlank() } }
             .map { cells ->
-                Row(headers.indices.associate { i -> headers[i] to (cells.getOrNull(i)?.trim() ?: "") })
+                Row(
+                    buildMap {
+                        headers.forEachIndexed { i, key ->
+                            // Blank and repeated headers would otherwise collide, and the
+                            // later column would quietly win.
+                            if (key.isNotEmpty() && !containsKey(key)) {
+                                put(key, cells.getOrNull(i)?.trim().orEmpty())
+                            }
+                        }
+                    }
+                )
             }
         return rawHeaders to rows
+    }
+
+    /** Every column name we know how to place, used to spot the header row. */
+    private val KNOWN_HEADERS: Set<String> =
+        (DATE + START_TIME + END_TIME + MILES + TRIP_PURPOSE + TXN_PURPOSE + NOTES +
+            START_ADDR + END_ADDR + VEHICLE + MERCHANT + AMOUNT + CATEGORY + TXN_TYPE).toSet()
+
+    /**
+     * Everlance writes a title block and a row of ===== above the real column names, so
+     * the first line of the file is not the header. Take whichever of the opening rows
+     * looks most like column names.
+     */
+    internal fun headerRowIndex(records: List<List<String>>): Int {
+        var best = 0
+        var bestScore = 0
+        records.take(HEADER_SEARCH_ROWS).forEachIndexed { index, row ->
+            val score = row.count { it.isNotBlank() && normalise(it) in KNOWN_HEADERS }
+            if (score > bestScore) {
+                bestScore = score
+                best = index
+            }
+        }
+        return if (bestScore >= 2) best else 0
+    }
+
+    /** Most exports are comma separated. Not all of them are. */
+    internal fun sniffDelimiter(text: String): Char {
+        val sample = text.lineSequence().take(HEADER_SEARCH_ROWS + 5).joinToString("\n")
+        val best = listOf(',', ';', '\t', '|')
+            .associateWith { d -> sample.count { it == d } }
+            .maxByOrNull { it.value }
+        return if (best != null && best.value > 0) best.key else ','
     }
 
     /**
@@ -116,7 +164,7 @@ object CsvImport {
      * field. Anywhere else it is literal text — a merchant called `Lowes 5" pipe` used to
      * flip the parser into quoted mode and swallow the rest of the file in silence.
      */
-    internal fun splitRecords(text: String): List<List<String>> {
+    internal fun splitRecords(text: String, delimiter: Char = ','): List<List<String>> {
         val records = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
         val field = StringBuilder()
@@ -137,7 +185,7 @@ object CsvImport {
                     else -> field.append(c)
                 }
                 c == '"' && atFieldStart -> { inQuotes = true; atFieldStart = false }
-                c == ',' -> endField()
+                c == delimiter -> endField()
                 c == '\n' || c == '\r' -> {
                     if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++
                     endField()
@@ -280,10 +328,12 @@ object CsvImport {
         }
         val kind = detectKind(rawHeaders)
         if (kind == Kind.UNKNOWN) {
+            val shown = rawHeaders.filter { it.isNotBlank() }.joinToString(", ").take(300)
             return Preview(
                 Kind.UNKNOWN, fileName, rawHeaders,
-                problem = "Could not tell what this file holds. It needs a distance column " +
-                    "for trips, or an amount column for transactions."
+                problem = "Could not find a column holding distance or amount, so there is " +
+                    "nothing to import. The row it read as column names was: " +
+                    shown.ifBlank { "(blank)" }
             )
         }
 
