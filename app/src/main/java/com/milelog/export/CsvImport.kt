@@ -59,14 +59,15 @@ object CsvImport {
     // ---- column spellings we understand -------------------------------------------------
 
     private val DATE = listOf("date", "tripdate", "day", "startdate", "transactiondate", "datetime")
-    private val START_TIME = listOf("starttime", "startedat", "begin", "begintime", "timestart")
-    private val END_TIME = listOf("endtime", "endedat", "finish", "finishtime", "timeend")
+    private val START_TIME = listOf("starttime", "timestarted", "startedat", "begin", "begintime", "timestart")
+    private val END_TIME = listOf("endtime", "timeended", "endedat", "finish", "finishtime", "timeend")
     private val MILES = listOf("miles", "distance", "distancemiles", "mileage", "tripdistance", "totalmiles")
     // Trips file: Everlance calls the work/personal column "Purpose", others call it "Category".
-    private val TRIP_PURPOSE = listOf("purpose", "category", "type", "tag", "classification", "workpurpose", "trippurpose")
+    private val TRIP_PURPOSE = listOf("businessline", "purpose", "category", "type", "tag", "classification", "workpurpose", "trippurpose")
     // Transactions file: "Category" there means the expense category, not the purpose.
-    private val TXN_PURPOSE = listOf("purpose", "tag", "classification", "workpurpose")
+    private val TXN_PURPOSE = listOf("businessline", "purpose", "tag", "classification", "workpurpose")
     private val NOTES = listOf("notes", "note", "description", "memo", "comment")
+    private val TAGS = listOf("tags", "tag", "label", "labels")
     private val START_ADDR = listOf("startlocation", "startaddress", "origin", "from", "startingpoint")
     private val END_ADDR = listOf("endlocation", "endaddress", "destination", "to", "endingpoint")
     private val VEHICLE = listOf("vehicle", "car", "vehiclename")
@@ -87,7 +88,7 @@ object CsvImport {
     private const val DUPLICATE_WINDOW_MS = 60_000L
 
     /** How far into the file to look for the row that holds the column names. */
-    private const val HEADER_SEARCH_ROWS = 20
+    private const val HEADER_SEARCH_ROWS = 80
 
     private fun normalise(header: String): String =
         header.lowercase(Locale.US).filter { it.isLetterOrDigit() }
@@ -347,6 +348,7 @@ object CsvImport {
         var first: Long? = null
         var last: Long? = null
         val rowsSeenOnDay = mutableMapOf<Long, Int>()
+        val signed = usesSignedAmounts(rows)
 
         for (row in rows) {
             val date = parseDate(row.first(*DATE.toTypedArray()))
@@ -372,7 +374,7 @@ object CsvImport {
                 if (repo.txns.countMatching(day, merchant, Math.abs(cents)) > 0) {
                     duplicates++; continue
                 }
-                if (isRevenue(row, cents)) revenue += Math.abs(cents) else expense += Math.abs(cents)
+                if (isRevenue(row, cents, signed)) revenue += Math.abs(cents) else expense += Math.abs(cents)
                 count++
             }
         }
@@ -447,6 +449,7 @@ object CsvImport {
         var txns = 0
         var skipped = 0
         val rowsSeenOnDay = mutableMapOf<Long, Int>()
+        val signed = usesSignedAmounts(rows)
 
         for (row in rows) {
             val date = parseDate(row.first(*DATE.toTypedArray()))
@@ -479,6 +482,7 @@ object CsvImport {
                         startAddress = row.first(*START_ADDR.toTypedArray()).orEmpty(),
                         endAddress = row.first(*END_ADDR.toTypedArray()).orEmpty(),
                         notes = row.first(*NOTES.toTypedArray()).orEmpty(),
+                        tags = row.first(*TAGS.toTypedArray()).orEmpty(),
                         source = TripSource.MANUAL
                     )
                 )
@@ -489,7 +493,7 @@ object CsvImport {
                 val merchant = row.first(*MERCHANT.toTypedArray()).orEmpty()
                 if (repo.txns.countMatching(day, merchant, Math.abs(cents)) > 0) { skipped++; continue }
 
-                val revenue = isRevenue(row, cents)
+                val revenue = isRevenue(row, cents, signed)
                 repo.txns.insert(
                     Txn(
                         type = if (revenue) TxnType.REVENUE else TxnType.EXPENSE,
@@ -502,6 +506,7 @@ object CsvImport {
                         ),
                         merchant = merchant,
                         notes = row.first(*NOTES.toTypedArray()).orEmpty(),
+                        tags = row.first(*TAGS.toTypedArray()).orEmpty(),
                         vehicleId = defaultVehicle
                     )
                 )
@@ -524,15 +529,23 @@ object CsvImport {
     }
 
     /** Money coming in, rather than going out. */
-    private fun isRevenue(row: Row, cents: Long): Boolean {
+    private fun isRevenue(row: Row, cents: Long, fileUsesSigns: Boolean): Boolean {
         val type = row.first(*TXN_TYPE.toTypedArray())?.lowercase(Locale.US).orEmpty()
         return when {
             type.contains("income") || type.contains("revenue") || type.contains("earning") ||
                 type.contains("credit") || type.contains("deposit") -> true
             type.contains("expense") || type.contains("debit") || type.contains("spend") -> false
-            // No type column: money written as a positive number is treated as spending,
-            // which is what these exports almost always hold.
-            else -> false
+            // No type column. Everlance writes spending as -$7.68, so a signed amount
+            // says which way the money went; an unsigned one is treated as spending.
+            // No type column. Everlance writes spending as -$7.68, so in a file that
+            // uses signs a positive amount is money coming in. In a file that does not,
+            // everything is treated as spending, which is what these exports hold.
+            else -> fileUsesSigns && cents > 0
         }
+    }
+
+    /** True when any amount in the file carries a minus sign or accounting brackets. */
+    private fun usesSignedAmounts(rows: List<Row>): Boolean = rows.any { row ->
+        row.first(*AMOUNT.toTypedArray())?.let { it.contains('-') || it.contains('(') } == true
     }
 }
