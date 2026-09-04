@@ -66,3 +66,15 @@ app/src/main/java/com/milelog/
 
 Kotlin, Jetpack Compose, Material 3, Room, WorkManager, Play Services Location,
 osmdroid. minSdk 29, targetSdk 36.
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+You may use, modify and redistribute this, including commercially, provided you
+keep the copyright notice and state what you changed.
+
+Map tiles come from the OpenStreetMap Foundation; map data is © OpenStreetMap
+contributors, available under the Open Database License. An app distributed to
+more than a handful of people should point osmdroid at its own tile server rather
+than OSM's public one, which their usage policy does not permit for that.
