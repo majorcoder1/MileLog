@@ -203,14 +203,32 @@ fun Pill(
  * accent itself is not readable on its own 18% tint.
  */
 @Composable
-fun Tag(text: String, color: Color = Blue, textColor: Color = TextHi) {
-    Surface(color = color.copy(alpha = 0.18f), contentColor = textColor, shape = RoundedCornerShape(6.dp)) {
-        Text(
-            text.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            maxLines = 1
-        )
+fun Tag(
+    text: String,
+    color: Color = Blue,
+    textColor: Color = TextHi,
+    onClick: (() -> Unit)? = null
+) {
+    Surface(
+        color = color.copy(alpha = 0.18f),
+        contentColor = textColor,
+        shape = RoundedCornerShape(8.dp),
+        modifier = if (onClick != null) {
+            Modifier.clickable(onClick = onClick).semantics {
+                contentDescription = "Filed as $text. Tap to change."
+            }
+        } else Modifier
+    ) {
+        Row(
+            // Roomy enough to hit while driving, since this is now a control.
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            if (onClick != null) {
+                Icon(Icons.Filled.ExpandMore, null, modifier = Modifier.size(16.dp))
+            }
+        }
     }
 }
 

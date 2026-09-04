@@ -103,6 +103,7 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
     var showTagDialog by remember { mutableStateOf(false) }
     var confirmDeleteTrip by remember { mutableStateOf<Long?>(null) }
     var confirmDeleteSelection by remember { mutableStateOf(false) }
+    var refiling by remember { mutableStateOf<TripRow?>(null) }
 
     val businessId = remember(purposes) {
         purposes.firstOrNull { it.deductionClass == DeductionClass.BUSINESS }?.id
@@ -274,6 +275,7 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
                                 else onOpenTrip(row.id)
                             },
                             onLongClick = { vm.toggleSelection(row.id) },
+                            onPurpose = { refiling = row },
                             onDelete = { confirmDeleteTrip = row.id }
                         )
                     }
@@ -390,6 +392,15 @@ fun TripsScreen(vm: TripsVm, onOpenTrip: (Long) -> Unit) {
         )
     }
 
+    refiling?.let { row ->
+        PurposeSheet(
+            purposes = purposes,
+            currentId = row.purposeId,
+            onPick = { id -> vm.classify(listOf(row.id), id); refiling = null },
+            onDismiss = { refiling = null }
+        )
+    }
+
     confirmDeleteTrip?.let { id ->
         ConfirmDelete(
             what = "this trip",
@@ -449,6 +460,7 @@ private fun SwipeTripCard(
     onSwipePersonal: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onPurpose: () -> Unit,
     onDelete: () -> Unit
 ) {
     val state = rememberSwipeToDismissBoxState(
@@ -465,7 +477,7 @@ private fun SwipeTripCard(
         state = state,
         backgroundContent = { SwipeBackdrop(state.dismissDirection) }
     ) {
-        TripCard(row, selected, selectionMode, onClick, onLongClick, onDelete)
+        TripCard(row, selected, selectionMode, onClick, onLongClick, onPurpose, onDelete)
     }
 }
 
@@ -477,6 +489,7 @@ private fun TripCard(
     selectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onPurpose: () -> Unit,
     onDelete: () -> Unit
 ) {
     val points = remember(row.pathCsv) { Geo.parsePath(row.pathCsv) }
@@ -503,7 +516,8 @@ private fun TripCard(
             )
             Tag(
                 row.purposeName ?: "Unclassified",
-                if (row.purposeName == null) TextMid else Blue
+                if (row.purposeName == null) TextMid else Blue,
+                onClick = onPurpose
             )
         }
         Divider()

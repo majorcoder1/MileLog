@@ -81,6 +81,7 @@ fun TransactionsScreen(vm: TxnVm, onOpenTxn: (Long, TxnType) -> Unit) {
     var showPurpose by remember { mutableStateOf(false) }
     var showPeriod by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<Long?>(null) }
+    var refiling by remember { mutableStateOf<TxnRow?>(null) }
 
     val typeLabel = when (filter.type) {
         null -> "All transactions"
@@ -163,10 +164,20 @@ fun TransactionsScreen(vm: TxnVm, onOpenTxn: (Long, TxnType) -> Unit) {
                         scope.launch { vm.classify(row.id, vm.personalPurposeId()) }
                     },
                     onClick = { onOpenTxn(row.id, row.type) },
+                    onPurpose = { refiling = row },
                     onDelete = { confirmDelete = row.id }
                 )
             }
         }
+    }
+
+    refiling?.let { row ->
+        PurposeSheet(
+            purposes = purposes,
+            currentId = row.purposeId,
+            onPick = { id -> vm.classify(row.id, id); refiling = null },
+            onDismiss = { refiling = null }
+        )
     }
 
     confirmDelete?.let { id ->
@@ -219,6 +230,7 @@ private fun SwipeTxnCard(
     onWork: () -> Unit,
     onPersonal: () -> Unit,
     onClick: () -> Unit,
+    onPurpose: () -> Unit,
     onDelete: () -> Unit
 ) {
     val state = rememberSwipeToDismissBoxState(
@@ -234,12 +246,17 @@ private fun SwipeTxnCard(
         state = state,
         backgroundContent = { SwipeBackdrop(state.dismissDirection) }
     ) {
-        TxnCard(row, onClick, onDelete)
+        TxnCard(row, onClick, onPurpose, onDelete)
     }
 }
 
 @Composable
-private fun TxnCard(row: TxnRow, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun TxnCard(
+    row: TxnRow,
+    onClick: () -> Unit,
+    onPurpose: () -> Unit,
+    onDelete: () -> Unit
+) {
     val amountColor = if (row.type == TxnType.REVENUE) Money else Spend
     val sign = if (row.type == TxnType.REVENUE) "+" else "-"
     Column(
@@ -259,7 +276,11 @@ private fun TxnCard(row: TxnRow, onClick: () -> Unit, onDelete: () -> Unit) {
                 style = MaterialTheme.typography.labelMedium,
                 color = TextMid
             )
-            Tag(row.purposeName ?: "Unclassified", if (row.purposeName == null) TextMid else Blue)
+            Tag(
+                row.purposeName ?: "Unclassified",
+                if (row.purposeName == null) TextMid else Blue,
+                onClick = onPurpose
+            )
         }
         Divider()
         Row(
