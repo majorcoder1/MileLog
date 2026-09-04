@@ -76,6 +76,43 @@ class VirtualDrive(
         return this
     }
 
+    /**
+     * Drives to a real place, following the great circle to it in steps. Waypoints let
+     * a route be laid out over actual roads and towns rather than an abstract distance.
+     */
+    fun to(
+        targetLat: Double,
+        targetLon: Double,
+        mph: Double,
+        curvinessDegrees: Double = 4.0
+    ): VirtualDrive {
+        val metresPerSecond = mph / MileageMeter.MPH_PER_MPS
+        val step = metresPerSecond * (fixIntervalMillis / 1000.0)
+        while (true) {
+            val remaining = MileageMeter.metersBetween(lat, lon, targetLat, targetLon)
+            if (remaining <= step) {
+                trueMeters += remaining
+                lat = targetLat
+                lon = targetLon
+                clock += fixIntervalMillis
+                emit(speedMps = metresPerSecond, moving = true)
+                return this
+            }
+            // Head for the target, wandering a little the way a road does.
+            val bearing = Math.toDegrees(
+                Math.atan2(
+                    (targetLon - lon) * cos(Math.toRadians(lat)),
+                    targetLat - lat
+                )
+            )
+            heading = bearing + (random.nextDouble() - 0.5) * 2 * curvinessDegrees
+            advance(step, heading)
+            trueMeters += step
+            clock += fixIntervalMillis
+            emit(speedMps = metresPerSecond, moving = true)
+        }
+    }
+
     /** A delivery run: drive there, sit while the order is handed over, drive on. */
     fun delivery(miles: Double, mph: Double = 32.0, waitSeconds: Int = 90): VirtualDrive =
         cruise(miles, mph, curvinessDegrees = 6.0).idle(waitSeconds)
