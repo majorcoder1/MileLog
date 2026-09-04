@@ -33,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -71,7 +72,8 @@ class TripTrackingService : Service() {
     /** Set synchronously, unlike tripId, so a second START cannot slip past the guard. */
     @Volatile private var starting = false
     @Volatile private var lastPersistedAt = 0L
-    @Volatile private var lastMovedAt = 0L
+    /** The arithmetic itself lives here, where it can be driven on a desk. */
+    private val meter = MileageMeter()
     @Volatile private var parkedAt: Location? = null
     // Kept so a short-looking leg can be explained rather than guessed at.
     @Volatile private var fixesUsed = 0
@@ -150,9 +152,9 @@ class TripTrackingService : Service() {
 
         idleTimer?.cancel()
         startedAt = System.currentTimeMillis()
-        lastMovedAt = startedAt
         autoStarted = auto
         miles = 0.0
+        meter.reset()
         last = null
         parkedAt = null
         fixesUsed = 0
@@ -268,9 +270,9 @@ class TripTrackingService : Service() {
         idleTimer?.cancel()
         idleTimer = scope.launch {
             delay(IDLE_SHUTDOWN_MS)
-            // Drive detection will start us again when it matters.
             Log.i(TAG, "Idle with no movement; standing down until the next drive")
-            shutDown()
+            // Drive detection will start us again when it matters.
+            withContext(Dispatchers.Main) { shutDown() }
         }
     }
 
@@ -280,7 +282,8 @@ class TripTrackingService : Service() {
         stopTimer?.cancel()
         stopTimer = scope.launch {
             delay(STOP_GRACE_MS)
-            endLeg(discard = false)
+            // Back to the main thread: onFix runs there, and the meter is not shared.
+            withContext(Dispatchers.Main) { endLeg(discard = false) }
         }
     }
 
@@ -314,9 +317,6 @@ class TripTrackingService : Service() {
     }
 
     private fun onFix(loc: Location) {
-        // Throw away fixes too fuzzy to be real driving.
-        if (loc.hasAccuracy() && loc.accuracy > 60f) return
-
         if (!recording) {
             // Watching. A free passive fix showing we have left where we parked is the
             // cue to open the next leg.
@@ -328,40 +328,33 @@ class TripTrackingService : Service() {
             return
         }
 
-        val prev = last
-        if (prev != null) {
-            val meters = prev.distanceTo(loc)
-            val seconds = ((loc.time - prev.time) / 1000.0).coerceAtLeast(0.5)
-            val mph = Geo.metersToMiles(meters.toDouble()) / (seconds / 3600.0)
+        val result = meter.accept(
+            MileageMeter.Fix(
+                latitude = loc.latitude,
+                longitude = loc.longitude,
+                timeMillis = loc.time,
+                speedMps = if (loc.hasSpeed()) loc.speed.toDouble() else null,
+                accuracyMeters = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null
+            )
+        )
+        droppedLegs = meter.droppedLegs
+        droppedMiles = meter.droppedMiles
+        fixesUsed = meter.fixesCounted
+        miles = meter.miles
 
-            // Standing still. A parked phone's fix wanders several metres a minute, and
-            // at a red light that wander used to be added as real distance. The
-            // receiver's own Doppler speed is far more trustworthy than differencing
-            // two positions.
-            val speedMph = if (loc.hasSpeed()) loc.speed * MPH_PER_MPS else mph
-            if (speedMph < STOPPED_MPH && meters < NOISE_METERS) {
-                if (System.currentTimeMillis() - lastMovedAt >= STOP_SPLIT_MS) {
-                    Log.i(TAG, "Stopped for ${STOP_SPLIT_MS / 60000} minutes; closing the leg")
-                    endLeg(discard = false)
-                }
+        when (result.outcome) {
+            MileageMeter.Outcome.LEG_ENDED -> {
+                Log.i(TAG, "Stopped long enough to be finished; closing the leg")
+                endLeg(discard = false)
                 return
             }
-
-            if (meters < MIN_SEGMENT_METERS) return
-            if (seconds >= 1.0 && mph > MAX_PLAUSIBLE_MPH) {
-                // Either a bad fix or a gap in the stream we cannot honestly measure.
-                // Re-anchor, but keep count: this is distance leaving the total.
-                droppedLegs++
-                droppedMiles += Geo.metersToMiles(meters.toDouble())
-                last = loc
-                return
-            }
-            fixesUsed++
-            miles += Geo.metersToMiles(meters.toDouble())
+            MileageMeter.Outcome.COUNTED, MileageMeter.Outcome.ANCHORED -> Unit
+            // Fuzzy, stationary, below the floor, or an impossible jump: nothing to add,
+            // and nothing worth putting on the map either.
+            else -> return
         }
 
         last = loc
-        lastMovedAt = System.currentTimeMillis()
         val snapshot = synchronized(points) {
             if (points.size < MAX_POINTS) {
                 points += loc.latitude to loc.longitude
