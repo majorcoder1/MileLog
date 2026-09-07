@@ -62,6 +62,10 @@ abstract class BaseVm(app: Application) : AndroidViewModel(app) {
     val vehicles: StateFlow<List<Vehicle>> = repo.vehiclesFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Every tag used before, so they can be picked instead of retyped. */
+    val knownTags: StateFlow<List<String>> = repo.knownTags()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     /** Recomputes the totals whenever anything inside the period changes. */
     protected fun summaryFlow(choice: StateFlow<PeriodChoice>): StateFlow<TaxSummary> =
         choice.flatMapLatest { c ->

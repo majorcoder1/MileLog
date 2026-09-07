@@ -3,6 +3,7 @@ package com.milelog.data
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
@@ -51,6 +52,23 @@ class Repo(context: Context) {
     val service get() = db.service()
 
     suspend fun seed() = Seed.runIfNeeded(db)
+
+    /**
+     * Every tag used before, across trips and transactions, so they can be picked
+     * rather than retyped. Tags live as comma-separated text on each record, which is
+     * why they are split out here rather than queried directly.
+     */
+    fun knownTags(): Flow<List<String>> =
+        combine(db.trips().allTagText(), db.txns().allTagText()) { trips, txns ->
+            (trips + txns)
+                .flatMap { it.split(',') }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .groupingBy { it.lowercase() }
+                .reduce { _, keep, _ -> keep }
+                .values
+                .sortedBy { it.lowercase() }
+        }
 
     fun purposesFlow(): Flow<List<Purpose>> = db.purposes().all()
     fun vehiclesFlow(): Flow<List<Vehicle>> = db.vehicles().all()

@@ -51,6 +51,7 @@ import com.milelog.ui.components.Divider
 import com.milelog.ui.components.MapPreview
 import com.milelog.ui.components.MapPlaceholder
 import com.milelog.ui.components.PurposeSheet
+import com.milelog.ui.components.TagSheet
 import com.milelog.ui.components.TimePickerDialog
 import com.milelog.ui.components.VehicleSheet
 import com.milelog.ui.theme.Sky
@@ -66,11 +67,13 @@ import java.time.ZoneId
 fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
     val trip by vm.trip.collectAsState()
     val purposes by vm.purposes.collectAsState()
+    val knownTags by vm.knownTags.collectAsState()
     val vehicles by vm.vehicles.collectAsState()
 
     var showPurpose by remember { mutableStateOf(false) }
     var showVehicle by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
+    var showTags by remember { mutableStateOf(false) }
     var showStartTime by remember { mutableStateOf(false) }
     var showEndTime by remember { mutableStateOf(false) }
     var milesText by remember { mutableStateOf("") }
@@ -215,14 +218,11 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
                 minLines = 3,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
-            OutlinedTextField(
-                value = current.tags,
-                onValueChange = { v -> vm.edit { it.copy(tags = v) } },
-                label = { Text("Tags, separated by commas") },
-                leadingIcon = { Icon(Icons.Filled.LocalOffer, null, tint = TextMid) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-            )
+            FormRow(
+                Icons.Filled.LocalOffer,
+                "Tags",
+                current.tags.ifBlank { null }
+            ) { showTags = true }
             Spacer(Modifier.height(20.dp))
         }
 
@@ -248,6 +248,17 @@ fun EditTripScreen(vm: EditTripVm, id: Long, onClose: () -> Unit) {
             currentId = current.vehicleId,
             onPick = { vid -> vm.edit { it.copy(vehicleId = vid) }; showVehicle = false },
             onDismiss = { showVehicle = false }
+        )
+    }
+    if (showTags) {
+        TagSheet(
+            known = knownTags,
+            selected = current.tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+            onDone = { picked ->
+                vm.edit { it.copy(tags = picked.joinToString(", ")) }
+                showTags = false
+            },
+            onDismiss = { showTags = false }
         )
     }
     if (showDate) {
@@ -299,4 +310,3 @@ private fun EndpointField(
         )
     }
 }
-

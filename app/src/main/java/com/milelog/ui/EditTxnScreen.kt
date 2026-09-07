@@ -65,6 +65,7 @@ import com.milelog.ui.components.CategorySheet
 import com.milelog.ui.components.DatePickerSheet
 import com.milelog.ui.components.Divider
 import com.milelog.ui.components.PurposeSheet
+import com.milelog.ui.components.TagSheet
 import com.milelog.ui.theme.CardHigh
 import com.milelog.ui.theme.Line
 import com.milelog.ui.theme.Money
@@ -88,10 +89,12 @@ fun EditTxnScreen(
     val txn by vm.txn.collectAsState()
     val categories by vm.categories.collectAsState()
     val purposes by vm.purposes.collectAsState()
+    val knownTags by vm.knownTags.collectAsState()
 
     var showPurpose by remember { mutableStateOf(false) }
     var showCategory by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
+    var showTags by remember { mutableStateOf(false) }
     var amountText by remember { mutableStateOf("") }
     var merchantFocused by remember { mutableStateOf(false) }
     val merchantHistory by vm.merchantHistory.collectAsState()
@@ -263,14 +266,11 @@ fun EditTxnScreen(
                 leadingIcon = { Icon(Icons.Filled.Notes, null, tint = TextMid) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
-            OutlinedTextField(
-                value = current.tags,
-                onValueChange = { v -> vm.edit { it.copy(tags = v) } },
-                label = { Text("Tags, separated by commas") },
-                leadingIcon = { Icon(Icons.Filled.LocalOffer, null, tint = TextMid) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-            )
+            FormRow(
+                Icons.Filled.LocalOffer,
+                "Tags",
+                current.tags.ifBlank { null }
+            ) { showTags = true }
             Spacer(Modifier.height(20.dp))
         }
 
@@ -297,6 +297,17 @@ fun EditTxnScreen(
             currentId = current.categoryId,
             onPick = { cid -> vm.edit { it.copy(categoryId = cid) }; showCategory = false },
             onDismiss = { showCategory = false }
+        )
+    }
+    if (showTags) {
+        TagSheet(
+            known = knownTags,
+            selected = current.tags.split(',').map { it.trim() }.filter { it.isNotEmpty() },
+            onDone = { picked ->
+                vm.edit { it.copy(tags = picked.joinToString(", ")) }
+                showTags = false
+            },
+            onDismiss = { showTags = false }
         )
     }
     if (showDate) {

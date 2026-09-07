@@ -83,6 +83,9 @@ interface TripDao {
            WHERE startEpoch BETWEEN :from AND :to AND ABS(miles - :miles) < 0.05"""
     )
     suspend fun countMatching(from: Long, to: Long, miles: Double): Int
+
+    @Query("SELECT tags FROM trips WHERE tags <> ''")
+    fun allTagText(): Flow<List<String>>
 }
 
 @Dao
@@ -147,6 +150,9 @@ interface TxnDao {
 
     @Query("SELECT COUNT(*) FROM txns WHERE dateEpochDay = :day AND merchant = :merchant AND amountCents = :cents")
     suspend fun countMatching(day: Long, merchant: String, cents: Long): Int
+
+    @Query("SELECT tags FROM txns WHERE tags <> ''")
+    fun allTagText(): Flow<List<String>>
 }
 
 @Dao

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -30,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -313,3 +315,80 @@ fun TimePickerDialog(initial: LocalTime, onPick: (LocalTime) -> Unit, onDismiss:
 
 val RevenueColor = Money
 val ExpenseColor = Spend
+
+/**
+ * Tags, picked rather than typed.
+ *
+ * Typing the same tag by hand every time invites "scion xb" and "Scion XB" living side
+ * by side and never matching, so what has been used before is offered as a list and
+ * something new is only typed once.
+ */
+@Composable
+fun TagSheet(
+    known: List<String>,
+    selected: List<String>,
+    onDone: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var picked by remember(selected) { mutableStateOf(selected.toSet()) }
+    var adding by remember { mutableStateOf(false) }
+    var fresh by remember { mutableStateOf("") }
+
+    // Anything on this record that has never been used elsewhere still belongs in the list.
+    val all = remember(known, selected) {
+        (known + selected).distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
+    }
+
+    SheetList(title = "Tags", onDismiss = { onDone(picked.toList()) }) {
+        LazyColumn(Modifier.weight(1f, fill = false)) {
+            items(all, key = { it.lowercase() }) { tag ->
+                SheetRow(
+                    tag,
+                    selected = picked.any { it.equals(tag, true) },
+                    icon = Icons.Filled.LocalOffer
+                ) {
+                    picked = if (picked.any { it.equals(tag, true) }) {
+                        picked.filterNot { it.equals(tag, true) }.toSet()
+                    } else {
+                        picked + tag
+                    }
+                }
+            }
+            item("add") {
+                if (adding) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = fresh,
+                            onValueChange = { fresh = it.replace(",", "") },
+                            label = { Text("New tag") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            enabled = fresh.isNotBlank(),
+                            onClick = {
+                                picked = picked + fresh.trim()
+                                fresh = ""
+                                adding = false
+                            }
+                        ) { Text("Add") }
+                    }
+                } else {
+                    SheetRow("Add a new tag", icon = Icons.Filled.AddCircleOutline) { adding = true }
+                }
+            }
+            item("done") {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { onDone(picked.toList()) }) { Text("Done") }
+                }
+            }
+        }
+    }
+}
