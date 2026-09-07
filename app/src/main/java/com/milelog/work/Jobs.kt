@@ -16,6 +16,7 @@ import com.milelog.R
 import com.milelog.data.DayRange
 import com.milelog.data.Fmt
 import com.milelog.data.Repo
+import com.milelog.data.ServiceState
 import com.milelog.export.Backup
 import com.milelog.tracking.DriveDetect
 import com.milelog.tracking.TripTracker
@@ -114,25 +115,34 @@ class DailyCheckWorker(context: Context, params: WorkerParameters) : CoroutineWo
         return Result.success()
     }
 
+    /**
+     * Tells you a job is due, by name, rather than leaving you to remember. One
+     * notification per job so each can be dismissed as it is dealt with.
+     */
     private suspend fun checkServiceReminders(repo: Repo) {
-        val vehicles = repo.vehicles.allNow().associateBy { it.id }
-        val todayDay = LocalDate.now().toEpochDay()
-        repo.schedule.enabledReminders().forEach { r ->
-            val vehicle = r.vehicleId?.let { vehicles[it] }
-            val dueByMiles = r.intervalMiles != null && r.lastDoneOdometer != null && vehicle != null &&
-                vehicle.odometer >= r.lastDoneOdometer + r.intervalMiles
-            val dueByDate = r.intervalDays != null && r.lastDoneEpochDay != null &&
-                todayDay >= r.lastDoneEpochDay + r.intervalDays
-            if (dueByMiles || dueByDate) {
+        repo.serviceStatuses()
+            .filter { it.state == ServiceState.DUE || it.state == ServiceState.DUE_SOON }
+            .forEach { status ->
+                val overdue = status.state == ServiceState.DUE
+                val detail = when {
+                    status.milesRemaining != null && status.milesRemaining <= 0 ->
+                        "Overdue by ${Fmt.miles(-status.milesRemaining)} miles."
+                    status.daysRemaining != null && status.daysRemaining <= 0 ->
+                        "Overdue by ${-status.daysRemaining} days."
+                    status.milesRemaining != null ->
+                        "About ${Fmt.miles(status.milesRemaining)} miles to go."
+                    status.daysRemaining != null -> "About ${status.daysRemaining} days to go."
+                    else -> "Worth booking in."
+                }
                 Jobs.notify(
                     applicationContext,
-                    NOTIF_SERVICE + r.id.toInt(),
-                    r.title,
-                    "${vehicle?.name ?: "Your vehicle"} is due. Log it as an expense when you get it done.",
-                    tab = "transactions"
+                    NOTIF_SERVICE + status.reminder.id.toInt(),
+                    if (overdue) "${status.reminder.title} is due" else "${status.reminder.title} coming up",
+                    listOfNotNull(status.vehicleName, detail).joinToString(" — ") +
+                        " Tap to log it once it is done.",
+                    tab = "service"
                 )
             }
-        }
     }
 
     private suspend fun checkShifts(repo: Repo) {

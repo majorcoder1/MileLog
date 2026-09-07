@@ -48,6 +48,7 @@ class Repo(context: Context) {
     val places get() = db.places()
     val rates get() = db.rates()
     val schedule get() = db.schedule()
+    val service get() = db.service()
 
     suspend fun seed() = Seed.runIfNeeded(db)
 
@@ -174,6 +175,73 @@ class Repo(context: Context) {
         years.sortedDescending()
     }
 
+    /**
+     * Best guess at what the odometer reads now: the highest figure ever written down
+     * for the vehicle, plus every tracked mile since it was written. Recorded trips only
+     * cover driving the app saw, so this reads low rather than high — which is the safe
+     * direction for a service interval.
+     */
+    suspend fun estimatedOdometer(vehicleId: Long?): Pair<Double, Long?> = withContext(Dispatchers.IO) {
+        val vehicle = vehicleId?.let { id -> db.vehicles().allNow().firstOrNull { it.id == id } }
+        val fromService = vehicleId?.let { db.service().highestOdometer(it) } ?: 0.0
+        val baseline = maxOf(vehicle?.odometer ?: 0.0, fromService)
+        if (baseline <= 0.0) return@withContext 0.0 to null
+
+        // Miles driven since whichever reading the baseline came from.
+        val since = db.service().allLogsNow()
+            .filter { it.vehicleId == vehicleId && it.odometer >= baseline - 0.5 }
+            .minOfOrNull { it.dateEpochDay }
+
+        val driven = if (since != null) {
+            val from = DayRange(since, LocalDate.now().toEpochDay())
+            db.trips().listBetween(from.fromMillis, from.toMillis)
+                .filter { vehicleId == null || it.vehicleId == vehicleId }
+                .sumOf { it.miles }
+        } else 0.0
+        (baseline + driven) to since
+    }
+
+    /** Every job being watched, with how close each is to being due. */
+    suspend fun serviceStatuses(): List<ServiceStatus> = withContext(Dispatchers.IO) {
+        val vehicles = db.vehicles().allNow().associateBy { it.id }
+        val logs = db.service().allLogsNow()
+        val today = LocalDate.now().toEpochDay()
+        val odometerCache = mutableMapOf<Long?, Double>()
+
+        db.schedule().enabledReminders().map { reminder ->
+            val last = logs.firstOrNull { it.reminderId == reminder.id }
+                ?: logs.firstOrNull { it.title.equals(reminder.title, true) && it.vehicleId == reminder.vehicleId }
+
+            val odometer = odometerCache.getOrPut(reminder.vehicleId) {
+                estimatedOdometer(reminder.vehicleId).first
+            }
+
+            val milesLeft = reminder.intervalMiles?.let { interval ->
+                last?.odometer?.let { done -> done + interval - odometer }
+            }
+            val daysLeft = reminder.intervalDays?.let { interval ->
+                last?.dateEpochDay?.let { done -> (done + interval - today).toInt() }
+            }
+
+            val state = when {
+                last == null -> ServiceState.NEVER_DONE
+                (milesLeft != null && milesLeft <= 0) || (daysLeft != null && daysLeft <= 0) -> ServiceState.DUE
+                (milesLeft != null && milesLeft <= DUE_SOON_MILES) ||
+                    (daysLeft != null && daysLeft <= DUE_SOON_DAYS) -> ServiceState.DUE_SOON
+                else -> ServiceState.OK
+            }
+
+            ServiceStatus(
+                reminder = reminder,
+                vehicleName = reminder.vehicleId?.let { vehicles[it]?.name },
+                lastDone = last,
+                state = state,
+                milesRemaining = milesLeft,
+                daysRemaining = daysLeft
+            )
+        }.sortedBy { it.state.ordinal }
+    }
+
     suspend fun defaultVehicleId(): Long? {
         val saved = prefs.defaultVehicleId
         if (saved != 0L) return saved
@@ -181,6 +249,10 @@ class Repo(context: Context) {
     }
 
     companion object {
+        /** Close enough to warn about. */
+        const val DUE_SOON_MILES = 500.0
+        const val DUE_SOON_DAYS = 14
+
         @Volatile private var instance: Repo? = null
         fun get(context: Context): Repo = instance ?: synchronized(this) {
             instance ?: Repo(context.applicationContext).also { instance = it }

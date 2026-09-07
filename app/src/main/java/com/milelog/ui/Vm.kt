@@ -14,7 +14,9 @@ import com.milelog.data.MileageRate
 import com.milelog.data.Period
 import com.milelog.data.Purpose
 import com.milelog.data.Repo
+import com.milelog.data.ServiceLog
 import com.milelog.data.ServiceReminder
+import com.milelog.data.ServiceStatus
 import com.milelog.data.Shift
 import com.milelog.data.TaxSummary
 import com.milelog.data.Trip
@@ -541,5 +543,74 @@ class EditTxnVm(app: Application) : BaseVm(app) {
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
         _txn.value?.takeIf { it.id != 0L }?.let { repo.txns.delete(it) }
         onDone()
+    }
+}
+
+/** Backs the Service tab: what is due, and logging what has been done. */
+@OptIn(ExperimentalCoroutinesApi::class)
+class ServiceVm(app: Application) : BaseVm(app) {
+
+    private val refresh = MutableStateFlow(0)
+
+    val statuses: StateFlow<List<ServiceStatus>> =
+        combine(refresh, repo.schedule.reminders(), repo.service.allLogs()) { _, _, _ -> Unit }
+            .mapLatest { repo.serviceStatuses() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val history: StateFlow<List<ServiceLog>> = repo.service.allLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _odometer = MutableStateFlow(0.0)
+    /** Best guess at the current reading, so the log form starts somewhere sensible. */
+    val odometer: StateFlow<Double> = _odometer
+
+    init {
+        viewModelScope.launch { _odometer.value = repo.estimatedOdometer(repo.defaultVehicleId()).first }
+    }
+
+    fun saveJob(reminder: ServiceReminder) = viewModelScope.launch {
+        if (reminder.id == 0L) repo.schedule.insertReminder(reminder)
+        else repo.schedule.updateReminder(reminder)
+        refresh.value++
+    }
+
+    fun deleteJob(reminder: ServiceReminder) = viewModelScope.launch {
+        repo.schedule.deleteReminder(reminder)
+        refresh.value++
+    }
+
+    /** Writes down a job done, and moves the clock on for that job. */
+    fun logService(
+        reminder: ServiceReminder?,
+        title: String,
+        odometerNow: Double,
+        day: Long,
+        notes: String,
+        vehicleId: Long?
+    ) = viewModelScope.launch {
+        repo.service.insertLog(
+            ServiceLog(
+                reminderId = reminder?.id,
+                vehicleId = vehicleId ?: reminder?.vehicleId ?: repo.defaultVehicleId(),
+                title = title,
+                odometer = odometerNow,
+                dateEpochDay = day,
+                notes = notes
+            )
+        )
+        // Keep the vehicle's own reading up to date, so trips and services agree.
+        val id = vehicleId ?: reminder?.vehicleId ?: repo.defaultVehicleId()
+        id?.let { vid ->
+            repo.vehicles.allNow().firstOrNull { it.id == vid }?.let { v ->
+                if (odometerNow > v.odometer) repo.vehicles.update(v.copy(odometer = odometerNow))
+            }
+        }
+        _odometer.value = odometerNow
+        refresh.value++
+    }
+
+    fun deleteLog(log: ServiceLog) = viewModelScope.launch {
+        repo.service.deleteLog(log)
+        refresh.value++
     }
 }

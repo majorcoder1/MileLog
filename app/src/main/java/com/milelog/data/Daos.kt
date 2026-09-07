@@ -228,3 +228,26 @@ interface ScheduleDao {
     @Query("SELECT * FROM service_reminders ORDER BY title") fun reminders(): Flow<List<ServiceReminder>>
     @Query("SELECT * FROM service_reminders WHERE enabled = 1") suspend fun enabledReminders(): List<ServiceReminder>
 }
+
+@Dao
+interface ServiceDao {
+    @Insert suspend fun insertLog(log: ServiceLog): Long
+    @Update suspend fun updateLog(log: ServiceLog)
+    @Delete suspend fun deleteLog(log: ServiceLog)
+
+    @Query("SELECT * FROM service_logs ORDER BY dateEpochDay DESC, id DESC")
+    fun allLogs(): Flow<List<ServiceLog>>
+
+    @Query("SELECT * FROM service_logs WHERE reminderId = :reminderId ORDER BY dateEpochDay DESC LIMIT 1")
+    suspend fun latestFor(reminderId: Long): ServiceLog?
+
+    @Query("SELECT * FROM service_logs ORDER BY dateEpochDay DESC")
+    suspend fun allLogsNow(): List<ServiceLog>
+
+    @Query("SELECT * FROM service_logs WHERE id = :id")
+    suspend fun logById(id: Long): ServiceLog?
+
+    /** The highest mileage ever written down for a vehicle, service or trip. */
+    @Query("SELECT MAX(odometer) FROM service_logs WHERE vehicleId = :vehicleId")
+    suspend fun highestOdometer(vehicleId: Long): Double?
+}

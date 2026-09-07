@@ -33,8 +33,8 @@ android {
         applicationId = "com.milelog"
         minSdk = 29
         targetSdk = 36
-        versionCode = 19
-        versionName = "2.8"
+        versionCode = 20
+        versionName = "2.9"
         vectorDrawables { useSupportLibrary = true }
     }
 

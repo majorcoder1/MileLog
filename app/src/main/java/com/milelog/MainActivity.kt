@@ -38,6 +38,8 @@ import com.milelog.ui.EditTxnVm
 import com.milelog.ui.HomeScreen
 import com.milelog.ui.HomeVm
 import com.milelog.ui.SettingsScreen
+import com.milelog.ui.ServiceScreen
+import com.milelog.ui.ServiceVm
 import com.milelog.ui.SettingsVm
 import com.milelog.ui.Tab
 import com.milelog.ui.TaxesScreen
@@ -67,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private val txnVm: TxnVm by viewModels()
     private val taxesVm: TaxesVm by viewModels()
     private val settingsVm: SettingsVm by viewModels()
+    private val serviceVm: ServiceVm by viewModels()
     private val editTripVm: EditTripVm by viewModels()
     private val editTxnVm: EditTxnVm by viewModels()
 
@@ -85,6 +88,10 @@ class MainActivity : ComponentActivity() {
                 var addOpen by rememberSaveable { mutableStateOf(false) }
                 val live by TripTracker.state.collectAsState()
                 val unclassified by homeVm.unclassifiedCount.collectAsState()
+                val serviceStatuses by serviceVm.statuses.collectAsState()
+                val serviceDue = serviceStatuses.count {
+                    it.state == com.milelog.data.ServiceState.DUE
+                }
 
                 val startPermission = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
@@ -105,6 +112,7 @@ class MainActivity : ComponentActivity() {
                             BottomBar(
                                 current = tab,
                                 unclassifiedCount = unclassified,
+                                serviceDueCount = serviceDue,
                                 addOpen = addOpen,
                                 onTab = { tab = it },
                                 onAdd = { addOpen = true }
@@ -138,6 +146,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenTxn = { id, type -> overlay = Overlay.Money(id, type) }
                                 )
                                 Tab.TAXES -> TaxesScreen(vm = taxesVm)
+                                Tab.SERVICE -> ServiceScreen(vm = serviceVm)
                             }
 
                             Overlay.Settings -> SettingsScreen(
@@ -167,6 +176,7 @@ class MainActivity : ComponentActivity() {
                         onAddTrip = { addOpen = false; overlay = Overlay.Trip(0) },
                         onAddExpense = { addOpen = false; overlay = Overlay.Money(0, TxnType.EXPENSE) },
                         onAddRevenue = { addOpen = false; overlay = Overlay.Money(0, TxnType.REVENUE) },
+                        onLogService = { addOpen = false; tab = Tab.SERVICE },
                         onTracking = {
                             addOpen = false
                             if (live.active) {
@@ -192,6 +202,7 @@ class MainActivity : ComponentActivity() {
         "taxes" -> Tab.TAXES
         "trips" -> Tab.TRIPS
         "transactions" -> Tab.TRANSACTIONS
+        "service" -> Tab.SERVICE
         else -> Tab.HOME
     }
 

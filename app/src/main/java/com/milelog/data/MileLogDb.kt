@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.TypeConverters
 import java.time.LocalDate
 
@@ -11,9 +13,9 @@ import java.time.LocalDate
     entities = [
         Trip::class, Txn::class, Purpose::class, Category::class, Vehicle::class,
         FavoritePlace::class, MileageRate::class, WorkWindow::class, Shift::class,
-        ServiceReminder::class
+        ServiceReminder::class, ServiceLog::class
     ],
-    version = 1,
+    version = 2,
     // Exported so a future version can be migrated onto rather than dropped.
     exportSchema = true
 )
@@ -27,14 +29,46 @@ abstract class MileLogDb : RoomDatabase() {
     abstract fun places(): PlaceDao
     abstract fun rates(): RateDao
     abstract fun schedule(): ScheduleDao
+    abstract fun service(): ServiceDao
 
     companion object {
+        /**
+         * Adds the service history table. Purely additive: nothing existing is touched,
+         * so trips, transactions and rates carry across untouched. Written by hand
+         * rather than falling back to a destructive migration, which would have wiped
+         * the year of records already on the phone.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `service_logs` (
+                        `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        `reminderId` INTEGER,
+                        `vehicleId` INTEGER,
+                        `title` TEXT NOT NULL,
+                        `odometer` REAL NOT NULL,
+                        `dateEpochDay` INTEGER NOT NULL,
+                        `costCents` INTEGER NOT NULL,
+                        `notes` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_service_logs_reminderId` ON `service_logs` (`reminderId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_service_logs_vehicleId` ON `service_logs` (`vehicleId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_service_logs_dateEpochDay` ON `service_logs` (`dateEpochDay`)")
+            }
+        }
+
         @Volatile private var instance: MileLogDb? = null
 
         fun get(context: Context): MileLogDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext, MileLogDb::class.java, "milelog.db"
-            ).build().also { instance = it }
+            )
+                .addMigrations(MIGRATION_1_2)
+                .build()
+                .also { instance = it }
         }
 
         /** Close and drop the cached handle, so a restore can swap the file underneath. */
@@ -54,6 +88,23 @@ object Seed {
         if (db.rates().count() == 0) seedRates(db)
         if (db.vehicles().count() == 0) {
             db.vehicles().insert(Vehicle(name = "My car", isDefault = true))
+        }
+        if (db.schedule().enabledReminders().isEmpty()) seedServiceJobs(db)
+    }
+
+    /** The jobs a working driver hits first. Everything else is a tap away. */
+    private suspend fun seedServiceJobs(db: MileLogDb) {
+        val vehicle = db.vehicles().defaultVehicle()?.id ?: db.vehicles().allNow().firstOrNull()?.id
+        ServiceTypes.startingSet.forEach { name ->
+            val preset = ServiceTypes.byName(name) ?: return@forEach
+            db.schedule().insertReminder(
+                ServiceReminder(
+                    vehicleId = vehicle,
+                    title = preset.name,
+                    intervalMiles = preset.everyMiles,
+                    intervalDays = preset.everyDays
+                )
+            )
         }
     }
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Home
@@ -45,14 +46,17 @@ import com.milelog.ui.theme.TextMid
 enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     HOME("home", "Home", Icons.Filled.Home),
     TRIPS("trips", "Trips", Icons.Filled.DirectionsCar),
-    TRANSACTIONS("transactions", "Transactions", Icons.Filled.ReceiptLong),
-    TAXES("taxes", "Taxes", Icons.Filled.Savings)
+    // Kept short: five tabs and the centre button have to share the width of a phone.
+    TRANSACTIONS("transactions", "Money", Icons.Filled.ReceiptLong),
+    TAXES("taxes", "Taxes", Icons.Filled.Savings),
+    SERVICE("service", "Upkeep", Icons.Filled.Build)
 }
 
 @Composable
 fun BottomBar(
     current: Tab,
     unclassifiedCount: Int,
+    serviceDueCount: Int,
     addOpen: Boolean,
     onTab: (Tab) -> Unit,
     onAdd: () -> Unit
@@ -71,9 +75,10 @@ fun BottomBar(
             ) {
                 BarItem(Tab.HOME, current, 0, Modifier.weight(1f)) { onTab(Tab.HOME) }
                 BarItem(Tab.TRIPS, current, unclassifiedCount, Modifier.weight(1f)) { onTab(Tab.TRIPS) }
-                Spacer(Modifier.width(76.dp))
+                Spacer(Modifier.width(72.dp))
                 BarItem(Tab.TRANSACTIONS, current, 0, Modifier.weight(1f)) { onTab(Tab.TRANSACTIONS) }
                 BarItem(Tab.TAXES, current, 0, Modifier.weight(1f)) { onTab(Tab.TAXES) }
+                BarItem(Tab.SERVICE, current, serviceDueCount, Modifier.weight(1f)) { onTab(Tab.SERVICE) }
             }
         }
 

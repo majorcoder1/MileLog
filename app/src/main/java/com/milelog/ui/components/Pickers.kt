@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.MyLocation
@@ -250,6 +251,7 @@ fun AddSheet(
     onAddTrip: () -> Unit,
     onAddExpense: () -> Unit,
     onAddRevenue: () -> Unit,
+    onLogService: () -> Unit,
     onTracking: () -> Unit,
     trackingActive: Boolean,
     onDismiss: () -> Unit
@@ -258,6 +260,7 @@ fun AddSheet(
         SheetRow("Add trip", icon = Icons.Filled.DirectionsCar) { onAddTrip() }
         SheetRow("Add expense", icon = Icons.Filled.RemoveCircleOutline) { onAddExpense() }
         SheetRow("Add revenue", icon = Icons.Filled.Payments) { onAddRevenue() }
+        SheetRow("Log a service", icon = Icons.Filled.Build) { onLogService() }
         SheetRow(
             if (trackingActive) "Stop tracking" else "Start tracking",
             icon = Icons.Filled.MyLocation

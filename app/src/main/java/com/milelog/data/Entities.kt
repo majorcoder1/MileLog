@@ -147,6 +147,11 @@ data class Shift(
 )
 
 @Entity(tableName = "service_reminders")
+/**
+ * A job worth keeping an eye on — an oil change, a tire rotation, the solenoids.
+ * [intervalMiles] and [intervalDays] say how often; either or both can be set, and
+ * whichever comes round first is what counts.
+ */
 data class ServiceReminder(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val vehicleId: Long? = null,
@@ -157,6 +162,46 @@ data class ServiceReminder(
     val lastDoneEpochDay: Long? = null,
     val enabled: Boolean = true
 )
+
+/**
+ * One job actually done, at a mileage and on a date. Kept as history rather than
+ * overwritten, so there is a record of what has been looked after — which matters when
+ * the vehicle is sold, and when a deduction is questioned.
+ */
+@Entity(
+    tableName = "service_logs",
+    indices = [Index("reminderId"), Index("vehicleId"), Index("dateEpochDay")]
+)
+data class ServiceLog(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val reminderId: Long? = null,
+    val vehicleId: Long? = null,
+    /** Copied rather than referenced, so history survives renaming the job. */
+    val title: String,
+    val odometer: Double,
+    val dateEpochDay: Long,
+    val costCents: Long = 0,
+    val notes: String = ""
+)
+
+/** How overdue a job is, worked out from the last one done. */
+enum class ServiceState { OK, DUE_SOON, DUE, NEVER_DONE }
+
+/** A job with its last service and what that means for today. */
+data class ServiceStatus(
+    val reminder: ServiceReminder,
+    val vehicleName: String?,
+    val lastDone: ServiceLog?,
+    val state: ServiceState,
+    /** Positive means still to go, negative means overdue. Null when not tracked by miles. */
+    val milesRemaining: Double?,
+    val daysRemaining: Int?
+) {
+    val dueAtOdometer: Double?
+        get() = lastDone?.odometer?.let { done ->
+            reminder.intervalMiles?.let { done + it }
+        }
+}
 
 class Converters {
     @TypeConverter fun deductionToString(v: DeductionClass): String = v.name
