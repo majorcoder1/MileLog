@@ -73,10 +73,12 @@ fun BottomBar(
                 Modifier.fillMaxWidth().height(64.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Money sits with Trips on the left; three tabs crowded onto the right
+                // of the centre button left that side unreadable.
                 BarItem(Tab.HOME, current, 0, Modifier.weight(1f)) { onTab(Tab.HOME) }
                 BarItem(Tab.TRIPS, current, unclassifiedCount, Modifier.weight(1f)) { onTab(Tab.TRIPS) }
-                Spacer(Modifier.width(72.dp))
                 BarItem(Tab.TRANSACTIONS, current, 0, Modifier.weight(1f)) { onTab(Tab.TRANSACTIONS) }
+                Spacer(Modifier.width(72.dp))
                 BarItem(Tab.TAXES, current, 0, Modifier.weight(1f)) { onTab(Tab.TAXES) }
                 BarItem(Tab.SERVICE, current, serviceDueCount, Modifier.weight(1f)) { onTab(Tab.SERVICE) }
             }

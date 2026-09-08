@@ -613,6 +613,16 @@ class ServiceVm(app: Application) : BaseVm(app) {
         refresh.value++
     }
 
+    /** Sets the reading by hand, for when the estimate has drifted from the dashboard. */
+    fun setOdometer(reading: Double) = viewModelScope.launch {
+        val id = repo.defaultVehicleId() ?: return@launch
+        repo.vehicles.allNow().firstOrNull { it.id == id }?.let { v ->
+            repo.vehicles.update(v.copy(odometer = reading))
+        }
+        _odometer.value = reading
+        refresh.value++
+    }
+
     fun deleteLog(log: ServiceLog) = viewModelScope.launch {
         repo.service.deleteLog(log)
         refresh.value++

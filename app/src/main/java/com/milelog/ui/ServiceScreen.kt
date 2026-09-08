@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Speed
@@ -91,6 +92,7 @@ fun ServiceScreen(vm: ServiceVm) {
     var editing by remember { mutableStateOf<ServiceReminder?>(null) }
     var confirmDelete by remember { mutableStateOf<ServiceReminder?>(null) }
     var deleteLog by remember { mutableStateOf<ServiceLog?>(null) }
+    var editOdometer by remember { mutableStateOf(false) }
 
     val due = statuses.filter { it.state == ServiceState.DUE }
     val soon = statuses.filter { it.state == ServiceState.DUE_SOON }
@@ -101,14 +103,24 @@ fun ServiceScreen(vm: ServiceVm) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            Column(
+                Modifier.clip(RoundedCornerShape(10.dp)).clickable { editOdometer = true }
+                    .padding(vertical = 4.dp, horizontal = 4.dp)
+            ) {
                 Text("Upkeep", style = MaterialTheme.typography.headlineMedium, color = TextHi)
-                Text(
-                    if (odometer > 0) "About ${Fmt.miles(odometer)} on the clock"
-                    else "Log a service to start tracking",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextMid
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (odometer > 0) "${Fmt.miles(odometer)} on the clock"
+                        else "Set your odometer",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Blue
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.Filled.Edit, "Change the odometer reading",
+                        tint = Blue, modifier = Modifier.size(15.dp)
+                    )
+                }
             }
             IconButton(onClick = { editing = ServiceReminder(title = "") }) {
                 Icon(Icons.Filled.Add, "Add something to watch", tint = Blue)
@@ -188,6 +200,14 @@ fun ServiceScreen(vm: ServiceVm) {
                 logging = null; loggingFresh = false
             },
             onDismiss = { logging = null; loggingFresh = false }
+        )
+    }
+
+    if (editOdometer) {
+        OdometerDialog(
+            current = odometer,
+            onSave = { vm.setOdometer(it); editOdometer = false },
+            onDismiss = { editOdometer = false }
         )
     }
 
@@ -275,7 +295,7 @@ private fun ServiceCard(
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = colour)
                 }
             }
-            TextButton(onClick = onLog) { Text("Done today") }
+            TextButton(onClick = onLog) { Text("I did this") }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Filled.Delete, "Stop watching this", tint = TextMid, modifier = Modifier.size(20.dp))
             }
@@ -532,3 +552,45 @@ private fun PickerRow(
         Text(value ?: "Choose", color = if (value == null) TextMid else Blue)
     }
 }
+
+/**
+ * The reading on the dashboard. The app's own figure only counts driving it recorded,
+ * so it runs low; this is how it gets put right.
+ */
+@Composable
+private fun OdometerDialog(current: Double, onSave: (Double) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(if (current > 0) current.toLong().toString() else "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Card,
+        title = { Text("Odometer reading", color = TextHi) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Miles on the clock") },
+                    leadingIcon = { Icon(Icons.Filled.Speed, null, tint = TextMid) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Read it off the dashboard. Everything due is worked out from here, so " +
+                        "it is worth correcting whenever you notice it has drifted.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMid
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = (text.toDoubleOrNull() ?: 0.0) > 0,
+                onClick = { onSave(text.toDouble()) }
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
