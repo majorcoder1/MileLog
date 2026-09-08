@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.milelog.ui.theme.Blue
 import com.milelog.ui.theme.Card
+import com.milelog.ui.theme.Ink
 import com.milelog.ui.theme.Line
 import com.milelog.ui.theme.TextMid
 
@@ -73,23 +74,27 @@ fun BottomBar(
                 Modifier.fillMaxWidth().height(64.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Money sits with Trips on the left; three tabs crowded onto the right
-                // of the centre button left that side unreadable.
+                // Five tabs share the width evenly. There is no gap for the centre
+                // button to sit in: with an odd number of tabs a centred gap is not
+                // possible, so the button rides above the bar instead of inside it.
                 BarItem(Tab.HOME, current, 0, Modifier.weight(1f)) { onTab(Tab.HOME) }
                 BarItem(Tab.TRIPS, current, unclassifiedCount, Modifier.weight(1f)) { onTab(Tab.TRIPS) }
                 BarItem(Tab.TRANSACTIONS, current, 0, Modifier.weight(1f)) { onTab(Tab.TRANSACTIONS) }
-                Spacer(Modifier.width(72.dp))
                 BarItem(Tab.TAXES, current, 0, Modifier.weight(1f)) { onTab(Tab.TAXES) }
                 BarItem(Tab.SERVICE, current, serviceDueCount, Modifier.weight(1f)) { onTab(Tab.SERVICE) }
             }
         }
 
-        // The center button sits above the bar, the way Aaron is used to.
+        // Clear of the tabs, with a ring of page colour so it reads as floating rather
+        // than as something dropped on top of the middle tab.
         Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = (-18).dp)
-                .size(62.dp)
+                .offset(y = (-40).dp)
+                .size(68.dp)
+                .clip(CircleShape)
+                .background(Ink)
+                .padding(4.dp)
                 .clip(CircleShape)
                 .background(Blue)
                 .clickable(onClick = onAdd),
