@@ -96,6 +96,8 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
     var email by remember { mutableStateOf(prefs.exportEmail) }
     var scheduleOn by remember { mutableStateOf(prefs.scheduleEnabled) }
     var dailyBackup by remember { mutableStateOf(prefs.dailyBackup) }
+    var backupFolder by remember { mutableStateOf(prefs.backupFolderUri) }
+    var lastFolderCopy by remember { mutableStateOf(prefs.lastFolderCopyEpoch) }
     var autoDetect by remember { mutableStateOf(prefs.autoDetect) }
     var workPurposeId by remember { mutableStateOf(prefs.workHoursPurposeId.takeIf { it != 0L }) }
 
@@ -121,6 +123,33 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                 val name = displayName(context, uri)
                 importPreview = withContext(Dispatchers.IO) { CsvImport.preview(context, uri, name) }
                 importBusy = false
+            }
+        }
+    }
+
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // Without this the permission dies with the app process and the nightly
+            // copy would silently stop.
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            prefs.backupFolderUri = uri.toString()
+            backupFolder = uri.toString()
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { Backup.copyToFolder(context, Backup.create(context)) }
+                }
+                lastFolderCopy = prefs.lastFolderCopyEpoch
+                result.onSuccess {
+                    Toast.makeText(context, "Backup copied to that folder.", Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    Toast.makeText(context, "Could not copy there: ${it.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -514,8 +543,8 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                 Text(
                     "Nothing goes to Google. Your trips carry the GPS route you actually drove, " +
                         "so MileLog keeps them off the cloud entirely. That means a new phone will " +
-                        "not restore on its own — send yourself a copy now and again so there is " +
-                        "one somewhere other than this phone.",
+                        "not restore on its own. Pick a backup folder below and let Syncthing " +
+                        "carry it to your computer, so there is always a copy off this phone.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextMid
                 )
@@ -568,6 +597,48 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Send myself a copy") }
+
+                Spacer(Modifier.height(16.dp))
+                Text("Backup folder", color = TextHi, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (backupFolder.isBlank()) {
+                        "Not set. Backups stay inside MileLog, where a phone reset would take them."
+                    } else {
+                        "Every backup is also copied to " +
+                            folderLabel(android.net.Uri.parse(backupFolder)) + ". " +
+                            if (lastFolderCopy > 0) {
+                                "Last copied ${Fmt.dateOf(lastFolderCopy)} at ${Fmt.time(lastFolderCopy)}."
+                            } else {
+                                "Nothing copied yet."
+                            }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (backupFolder.isBlank()) Warn else TextMid
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { folderLauncher.launch(null) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (backupFolder.isBlank()) "Choose folder" else "Change folder") }
+                    if (backupFolder.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    context.contentResolver.releasePersistableUriPermission(
+                                        android.net.Uri.parse(backupFolder),
+                                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    )
+                                }
+                                prefs.backupFolderUri = ""
+                                backupFolder = ""
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Stop copying") }
+                    }
+                }
             }
 
             SectionCard {
@@ -1106,6 +1177,12 @@ private fun displayName(context: android.content.Context, uri: android.net.Uri):
             if (i >= 0 && c.moveToFirst()) c.getString(i) else null
         }
     }.getOrNull() ?: uri.lastPathSegment ?: "the file"
+
+/** "Documents/MileLog Backups" out of a tree URI like primary:Documents/MileLog Backups. */
+private fun folderLabel(uri: android.net.Uri): String =
+    runCatching {
+        android.provider.DocumentsContract.getTreeDocumentId(uri).substringAfter(':').ifBlank { "the phone's main storage" }
+    }.getOrNull() ?: "the folder you picked"
 
 /**
  * The installed version, read from the package rather than a constant, so it can never

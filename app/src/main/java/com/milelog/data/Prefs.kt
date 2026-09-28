@@ -36,6 +36,15 @@ class Prefs(context: Context) {
         get() = sp.getLong(K_LAST_BACKUP, 0L)
         set(v) = sp.edit { putLong(K_LAST_BACKUP, v) }
 
+    /** A folder picked by the user that every backup is also copied into, or "" for none. */
+    var backupFolderUri: String
+        get() = sp.getString(K_BACKUP_FOLDER, "") ?: ""
+        set(v) = sp.edit { putString(K_BACKUP_FOLDER, v) }
+
+    var lastFolderCopyEpoch: Long
+        get() = sp.getLong(K_LAST_FOLDER_COPY, 0L)
+        set(v) = sp.edit { putLong(K_LAST_FOLDER_COPY, v) }
+
     /** Set while a trip is being recorded so the service can be resumed after a crash. */
     var activeTripId: Long
         get() = sp.getLong(K_ACTIVE_TRIP, 0L)
@@ -57,6 +66,8 @@ class Prefs(context: Context) {
         const val K_EMAIL = "export_email"
         const val K_DAILY_BACKUP = "daily_backup"
         const val K_LAST_BACKUP = "last_backup"
+        const val K_BACKUP_FOLDER = "backup_folder"
+        const val K_LAST_FOLDER_COPY = "last_folder_copy"
         const val K_ACTIVE_TRIP = "active_trip"
         const val K_YEAR_END = "year_end_notified"
         const val K_ONBOARD = "seen_onboarding"

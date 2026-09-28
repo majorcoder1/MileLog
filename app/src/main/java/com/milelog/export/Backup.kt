@@ -3,6 +3,7 @@ package com.milelog.export
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
+import android.provider.DocumentsContract
 import com.milelog.data.MileLogDb
 import com.milelog.data.Repo
 import java.io.File
@@ -69,7 +70,65 @@ object Backup {
 
         repo.prefs.lastBackupEpoch = System.currentTimeMillis()
         list(context).drop(KEEP).forEach { it.delete() }
+        // The copy is extra, so failing it must not cost the backup that was just made.
+        runCatching { copyToFolder(context, out) }
         return out
+    }
+
+    /**
+     * Copies a backup into the folder picked in Settings, if there is one, and trims that
+     * folder to the last [KEEP] as well. The point is a copy that something else — Syncthing,
+     * a USB stick — can carry off the phone, because the app's own folder is out of reach
+     * of everything but MileLog and goes when the phone is wiped.
+     *
+     * Goes through the document tree directly rather than DocumentFile, which would be
+     * a whole library for three calls.
+     */
+    fun copyToFolder(context: Context, backup: File) {
+        val prefs = Repo.get(context).prefs
+        val tree = prefs.backupFolderUri.takeIf { it.isNotBlank() }?.let(Uri::parse) ?: return
+        val resolver = context.contentResolver
+        val parent = DocumentsContract.buildDocumentUriUsingTree(
+            tree, DocumentsContract.getTreeDocumentId(tree)
+        )
+
+        val existing = folderBackups(context, tree)
+        // Same-day backups share a name. Overwrite rather than create, or the provider
+        // quietly makes "name (1).zip" and the folder fills with duplicates.
+        val target = existing.firstOrNull { it.second == backup.name }?.first
+            ?: DocumentsContract.createDocument(resolver, parent, "application/zip", backup.name)
+            ?: error("Could not create a file in the backup folder.")
+        resolver.openOutputStream(target, "wt").use { output ->
+            requireNotNull(output) { "Could not write to the backup folder." }
+            backup.inputStream().use { it.copyTo(output) }
+        }
+        prefs.lastFolderCopyEpoch = System.currentTimeMillis()
+
+        folderBackups(context, tree)
+            .sortedByDescending { it.second }
+            .drop(KEEP)
+            .forEach { runCatching { DocumentsContract.deleteDocument(resolver, it.first) } }
+    }
+
+    /** MileLog's own backups in the picked folder, as (uri, name). Other files are left alone. */
+    private fun folderBackups(context: Context, tree: Uri): List<Pair<Uri, String>> {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(
+            tree, DocumentsContract.getTreeDocumentId(tree)
+        )
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        )
+        return context.contentResolver.query(children, columns, null, null, null)?.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val name = c.getString(1) ?: continue
+                    if (name.startsWith(MARKER) && name.endsWith(".zip")) {
+                        add(DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)) to name)
+                    }
+                }
+            }
+        } ?: emptyList()
     }
 
     /**
