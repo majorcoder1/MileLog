@@ -1,5 +1,6 @@
 package com.milelog.tracking
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -7,18 +8,23 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorManager
+import android.hardware.TriggerEvent
+import android.hardware.TriggerEventListener
 import android.location.Location
+import android.location.LocationManager
 import android.net.Uri
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import androidx.core.location.LocationListenerCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.location.LocationRequestCompat
 import com.milelog.MainActivity
 import com.milelog.MileLogApp
 import com.milelog.R
@@ -33,9 +39,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 
 /**
  * Records driving, one leg at a time.
@@ -50,11 +60,16 @@ import java.time.ZoneId
  * they are collected whenever some other app asks for a fix — and waits. Movement, or a
  * drive-detection event, opens the next leg. GPS is off for the whole of that wait,
  * which is where the battery goes.
+ *
+ * Location comes from Android's own LocationManager rather than Google's fused provider,
+ * so recording a drive does not depend on Google Play services being present or
+ * permitted. On a phone where Google cannot do the detecting either, this service also
+ * stands the watch itself: see [ACTION_WATCH] and [DriveWatch].
  */
 class TripTrackingService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val client by lazy { LocationServices.getFusedLocationProviderClient(this) }
+    private val locations by lazy { getSystemService(LocationManager::class.java) }
     private lateinit var repo: Repo
 
     // Written on the main thread by onFix, read from IO when a leg is saved, so every
@@ -85,16 +100,22 @@ class TripTrackingService : Service() {
      */
     @Volatile private var announcedThisSession = false
 
+    // ---- standing the watch without Google ------------------------------------------
+    /** True when this service, rather than Google, is what notices the next drive. */
+    @Volatile private var standingWatch = false
+    @Volatile private var watchJob: Job? = null
+    @Volatile private var lastCheckAt = 0L
+    /** The decision "is this a drive", kept separate so it can be tested. */
+    private val watch = DriveWatch()
+    /** Set by the phone's own movement sensor, cleared when a check acts on it. */
+    private val motionSeen = AtomicBoolean(true)
+    @Volatile private var motionTrigger: TriggerEventListener? = null
+    /** What to say on the notification while watching, when it is not the usual. */
+    @Volatile private var watchNote: String? = null
+
     private val recording: Boolean get() = tripId != 0L
 
-    private val callback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            // Fused location batches fixes when the screen is off. Taking only the newest
-            // one threw the rest of the batch away and measured the whole leg as a single
-            // straight line between two distant points.
-            result.locations.sortedBy { it.time }.forEach { onFix(it) }
-        }
-    }
+    private val listener = LocationListenerCompat { location -> onFix(location) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -106,6 +127,9 @@ class TripTrackingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                // A previous command may have stood this instance down. It is being
+                // reused, so the shutdown flag has to go or nothing can stop it later.
+                saving = false
                 // Android can refuse this outright: a location service started from the
                 // background needs "Allow all the time". Refusal must not kill the app.
                 if (!promoteToForeground()) {
@@ -115,11 +139,35 @@ class TripTrackingService : Service() {
                 }
                 if (!recording) startLeg(intent.getBooleanExtra(EXTRA_AUTO, false))
             }
+            ACTION_WATCH -> {
+                saving = false
+                // Nothing to tell the user if this is refused: no drive has been missed
+                // yet, and the app re-arms the watch every time it is opened.
+                if (!promoteToForeground()) {
+                    Log.w(TAG, "Not allowed to stand watch from the background just now")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                standingWatch = true
+                if (!recording) beginWatching(from = last ?: parkedAt)
+                publishWatching()
+                updateNotification()
+            }
+            ACTION_STOP_WATCH -> {
+                standingWatch = false
+                if (recording) {
+                    updateNotification()
+                } else {
+                    shutDown()
+                }
+            }
             ACTION_STOP -> {
+                standingWatch = false
                 endLeg(discard = false)
                 shutDown()
             }
             ACTION_DISCARD -> {
+                standingWatch = false
                 endLeg(discard = true)
                 shutDown()
             }
@@ -151,6 +199,7 @@ class TripTrackingService : Service() {
         }
 
         idleTimer?.cancel()
+        stopWatching()
         startedAt = System.currentTimeMillis()
         autoStarted = auto
         miles = 0.0
@@ -195,7 +244,8 @@ class TripTrackingService : Service() {
 
     /**
      * Closes the current leg and drops to the cheap watching state. The service stays
-     * alive briefly so a quick turnaround does not have to pay for a cold start.
+     * alive briefly so a quick turnaround does not have to pay for a cold start — or
+     * indefinitely, when it is this service rather than Google keeping the watch.
      */
     private fun endLeg(discard: Boolean) {
         stopTimer?.cancel()
@@ -247,9 +297,14 @@ class TripTrackingService : Service() {
             repo.prefs.activeTripId = 0L
         }
 
-        requestUpdates(active = false)
+        if (standingWatch) {
+            beginWatching(from = parkedAt)
+            publishWatching()
+        } else {
+            requestUpdates(active = false)
+            armIdleShutdown()
+        }
         updateNotification()
-        armIdleShutdown()
     }
 
     /** Nothing more expected for a while; let go of everything. */
@@ -258,7 +313,8 @@ class TripTrackingService : Service() {
         saving = true
         stopTimer?.cancel()
         idleTimer?.cancel()
-        runCatching { client.removeLocationUpdates(callback) }
+        stopWatching()
+        runCatching { locations?.removeUpdates(listener) }
         scope.launch {
             TripTracker.clear()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -287,41 +343,223 @@ class TripTrackingService : Service() {
         }
     }
 
+    // ---- watching, with no Google in it ---------------------------------------------
+
+    /**
+     * Starts the cheap watch for the next drive: free passive fixes, the phone's own
+     * movement sensor, and a slow loop that takes a reading of its own when the phone
+     * has actually moved. GPS itself stays off until one of those says to look.
+     */
+    private fun beginWatching(from: Location?) {
+        requestUpdates(active = false)
+        watch.reset()
+        from?.let { watch.anchor(it.toWatchFix()) }
+        armMotionTrigger()
+        watchJob?.cancel()
+        watchJob = scope.launch {
+            while (standingWatch && !recording) {
+                delay(TICK_MS)
+                if (!standingWatch || recording) break
+                val moved = motionSeen.getAndSet(false)
+                val since = System.currentTimeMillis() - lastCheckAt
+                val due = when {
+                    // The phone says it has moved. That is what we were waiting for.
+                    moved -> true
+                    // No movement sensor to wait on, so this loop is the only signal.
+                    !hasMotionSensor() -> since >= NO_SENSOR_CHECK_MS
+                    // A look now and then regardless, in case the sensor is the thing
+                    // that has stopped reporting.
+                    else -> since >= RESTING_CHECK_MS
+                }
+                if (due) checkForDriving("loop")
+            }
+        }
+    }
+
+    private fun stopWatching() {
+        watchJob?.cancel()
+        watchJob = null
+        disarmMotionTrigger()
+    }
+
+    /**
+     * The phone's own significant-motion sensor: hardware, no Google, and free until it
+     * fires. It is one-shot, so every trigger re-arms it. A parked car sets this off the
+     * moment it pulls away, which is the whole point.
+     */
+    private fun armMotionTrigger() {
+        disarmMotionTrigger()
+        val sensors = getSystemService(SensorManager::class.java) ?: return
+        val sensor = sensors.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION) ?: return
+        val trigger = object : TriggerEventListener() {
+            override fun onTrigger(event: TriggerEvent?) {
+                motionSeen.set(true)
+                motionTrigger = null
+                if (!standingWatch || recording) return
+                armMotionTrigger()
+                // Look now rather than waiting for the next tick: this is the phone
+                // telling us it has started moving.
+                scope.launch { checkForDriving("movement") }
+            }
+        }
+        motionTrigger = trigger
+        runCatching { sensors.requestTriggerSensor(trigger, sensor) }
+            .onFailure { motionTrigger = null }
+    }
+
+    private fun disarmMotionTrigger() {
+        val trigger = motionTrigger ?: return
+        motionTrigger = null
+        val sensors = getSystemService(SensorManager::class.java) ?: return
+        val sensor = sensors.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION) ?: return
+        runCatching { sensors.cancelTriggerSensor(trigger, sensor) }
+    }
+
+    private fun hasMotionSensor(): Boolean =
+        getSystemService(SensorManager::class.java)
+            ?.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION) != null
+
+    /**
+     * Takes one reading and opens a leg if it looks like a drive. Guarded so a phone
+     * being carried around cannot turn this into a continuous GPS session.
+     */
+    private suspend fun checkForDriving(because: String) {
+        if (!standingWatch || recording) return
+        val now = System.currentTimeMillis()
+        if (now - lastCheckAt < MIN_CHECK_GAP_MS) return
+        lastCheckAt = now
+
+        val wake = runCatching {
+            getSystemService(PowerManager::class.java)
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "milelog:watch")
+                ?.apply { acquire(FIX_TIMEOUT_MS + 5_000L) }
+        }.getOrNull()
+
+        try {
+            val fix = freshFix()
+            if (fix == null) {
+                val off = locations?.let { lm ->
+                    runCatching { !lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
+                } ?: false
+                watchNote = if (off) {
+                    "Location is turned off, so MileLog cannot see the car move."
+                } else {
+                    null
+                }
+                updateNotification()
+                return
+            }
+            watchNote = null
+            // onFix judges passive fixes on the main thread and DriveWatch keeps state
+            // between fixes, so this one is judged there too rather than racing it.
+            val verdict = withContext(Dispatchers.Main) { watch.consider(fix.toWatchFix()) }
+            Log.i(
+                TAG,
+                "Watch check ($because): $verdict at " +
+                    "${watch.lastMph?.let { "%.1f".format(it) } ?: "no"} mph"
+            )
+            if (verdict == DriveWatch.Verdict.DRIVING) {
+                withContext(Dispatchers.Main) { startLeg(auto = true) }
+            }
+        } finally {
+            runCatching { if (wake?.isHeld == true) wake.release() }
+        }
+    }
+
+    /**
+     * A position to judge, cheapest first: a reading some other app has just paid for,
+     * and only failing that one of our own.
+     */
+    private suspend fun freshFix(): Location? {
+        val lm = locations ?: return null
+        if (!hasLocationPermission()) return null
+
+        val providers = buildList {
+            add(LocationManager.GPS_PROVIDER)
+            if (Build.VERSION.SDK_INT >= 31) add(LocationManager.FUSED_PROVIDER)
+        }
+        val cached = providers
+            .mapNotNull { provider ->
+                runCatching { lm.getLastKnownLocation(provider) }.getOrNull()
+            }
+            .maxByOrNull { it.time }
+        if (cached != null && System.currentTimeMillis() - cached.time < CACHED_FIX_MAX_AGE_MS) {
+            return cached
+        }
+        return ownFix(lm)
+    }
+
+    /** Turns GPS on for as long as it takes to get one fix, and no longer. */
+    @SuppressLint("MissingPermission")
+    private suspend fun ownFix(lm: LocationManager): Location? {
+        if (!runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
+            return null
+        }
+        return withTimeoutOrNull(FIX_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                val once = object : LocationListenerCompat {
+                    override fun onLocationChanged(location: Location) {
+                        runCatching { lm.removeUpdates(this) }
+                        if (cont.isActive) cont.resume(location)
+                    }
+                }
+                cont.invokeOnCancellation { runCatching { lm.removeUpdates(once) } }
+                val request = LocationRequestCompat.Builder(1000L)
+                    .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
+                    .build()
+                runCatching {
+                    LocationManagerCompat.requestLocationUpdates(
+                        lm, LocationManager.GPS_PROVIDER, request, once, mainLooper
+                    )
+                }.onFailure { if (cont.isActive) cont.resume(null) }
+            }
+        }
+    }
+
+    private fun publishWatching() {
+        if (recording) return
+        TripTracker.set(LiveTrip(watching = standingWatch))
+    }
+
     // ---- location -----------------------------------------------------------------
 
+    @SuppressLint("MissingPermission")
     private fun requestUpdates(active: Boolean) {
+        val lm = locations ?: return
         if (!hasLocationPermission()) return
-        runCatching { client.removeLocationUpdates(callback) }
+        runCatching { lm.removeUpdates(listener) }
 
-        val request = if (active) {
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, ACTIVE_INTERVAL_MS)
+        val request: LocationRequestCompat
+        val provider: String
+        if (active) {
+            request = LocationRequestCompat.Builder(ACTIVE_INTERVAL_MS)
                 .setMinUpdateIntervalMillis(ACTIVE_MIN_INTERVAL_MS)
                 // No distance filter: a fix every few seconds follows a curve, where one
                 // every eight metres of displacement cuts the corners off it.
                 .setMinUpdateDistanceMeters(0f)
-                .setMaxUpdateDelayMillis(0L)
-                .setWaitForAccurateLocation(false)
+                .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
                 .build()
+            provider = LocationManager.GPS_PROVIDER
         } else {
             // Passive costs nothing: it only ever hands us a fix some other app already
             // paid for. Between legs this is the whole of our location use.
-            LocationRequest.Builder(Priority.PRIORITY_PASSIVE, PASSIVE_INTERVAL_MS)
+            request = LocationRequestCompat.Builder(PASSIVE_INTERVAL_MS)
                 .setMinUpdateDistanceMeters(RESUME_METERS)
+                .setQuality(LocationRequestCompat.QUALITY_LOW_POWER)
                 .build()
+            provider = LocationManager.PASSIVE_PROVIDER
         }
-        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
-            client.requestLocationUpdates(request, callback, mainLooper)
-        }
+
+        runCatching {
+            LocationManagerCompat.requestLocationUpdates(lm, provider, request, listener, mainLooper)
+        }.onFailure { Log.w(TAG, "Could not ask for location: ${it.message}") }
     }
 
     private fun onFix(loc: Location) {
         if (!recording) {
-            // Watching. A free passive fix showing we have left where we parked is the
-            // cue to open the next leg.
-            val parked = parkedAt
-            if (parked == null || parked.distanceTo(loc) > RESUME_METERS) {
+            // Watching. A free fix showing the car is under way is the cue to open the
+            // next leg — the same test the periodic check uses.
+            if (watch.consider(loc.toWatchFix()) == DriveWatch.Verdict.DRIVING) {
                 Log.i(TAG, "Movement seen while watching; opening the next leg")
                 startLeg(auto = true)
             }
@@ -437,6 +675,15 @@ class TripTrackingService : Service() {
         ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun Location.toWatchFix() = DriveWatch.Fix(
+        latitude = latitude,
+        longitude = longitude,
+        timeMillis = time,
+        speedMps = if (hasSpeed()) speed.toDouble() else null,
+        speedAccuracyMps = if (hasSpeedAccuracy()) speedAccuracyMetersPerSecond.toDouble() else null,
+        accuracyMeters = if (hasAccuracy()) accuracy.toDouble() else null
+    )
+
     // ---- notification -------------------------------------------------------------
 
     private fun buildNotification(): Notification {
@@ -446,6 +693,10 @@ class TripTrackingService : Service() {
         )
         val stop = PendingIntent.getService(
             this, 1, Intent(this, TripTrackingService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val stopWatching = PendingIntent.getService(
+            this, 2, Intent(this, TripTrackingService::class.java).setAction(ACTION_STOP_WATCH),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val builder = NotificationCompat.Builder(this, MileLogApp.CH_TRACKING)
@@ -465,8 +716,8 @@ class TripTrackingService : Service() {
         } else {
             builder
                 .setContentTitle("Watching for your next drive")
-                .setContentText("GPS is off until you move.")
-                .addAction(0, "Stop watching", stop)
+                .setContentText(watchNote ?: "GPS is off until you move.")
+                .addAction(0, "Stop watching", stopWatching)
                 .build()
         }
     }
@@ -539,7 +790,8 @@ class TripTrackingService : Service() {
     }
 
     override fun onDestroy() {
-        runCatching { client.removeLocationUpdates(callback) }
+        runCatching { locations?.removeUpdates(listener) }
+        stopWatching()
         stopTimer?.cancel()
         idleTimer?.cancel()
         // The timers and any in-flight save would otherwise outlive the service and keep
@@ -554,6 +806,8 @@ class TripTrackingService : Service() {
         const val ACTION_DISCARD = "com.milelog.DISCARD"
         const val ACTION_ARM_STOP = "com.milelog.ARM_STOP"
         const val ACTION_CANCEL_STOP = "com.milelog.CANCEL_STOP"
+        const val ACTION_WATCH = "com.milelog.WATCH"
+        const val ACTION_STOP_WATCH = "com.milelog.STOP_WATCH"
         const val EXTRA_AUTO = "auto"
 
         private const val TAG = "MileLogTracking"
@@ -570,8 +824,6 @@ class TripTrackingService : Service() {
         private const val ACTIVE_MIN_INTERVAL_MS = 1500L
         private const val PASSIVE_INTERVAL_MS = 30_000L
 
-        /** Still for this long and the leg is closed, the way a delivery day really goes. */
-        private const val STOP_SPLIT_MS = 2 * 60 * 1000L
         /** Drive detection saying the drive ended is given a shorter benefit of the doubt. */
         private const val STOP_GRACE_MS = 90 * 1000L
         /** Hang about this long after a leg before letting go of everything. */
@@ -579,13 +831,18 @@ class TripTrackingService : Service() {
         /** Far enough from where we parked to count as setting off again. */
         private const val RESUME_METERS = 80f
 
-        private const val MPH_PER_MPS = 2.236936
-        /** Below this the receiver is reporting a vehicle that is not moving. */
-        private const val STOPPED_MPH = 2.0
-        /** How far a fix must jump before it counts as movement rather than GPS wander. */
-        private const val NOISE_METERS = 30f
-        private const val MIN_SEGMENT_METERS = 5f
-        private const val MAX_PLAUSIBLE_MPH = 120.0
+        /** How often the watching loop wakes up to consider taking a reading. */
+        private const val TICK_MS = 2 * 60 * 1000L
+        /** Never two readings closer together than this, whatever asks for them. */
+        private const val MIN_CHECK_GAP_MS = 100 * 1000L
+        /** A reading this often even if the phone has not stirred, in case the sensor has not. */
+        private const val RESTING_CHECK_MS = 30 * 60 * 1000L
+        /** On a phone with no movement sensor, the loop is all there is. */
+        private const val NO_SENSOR_CHECK_MS = 5 * 60 * 1000L
+        /** A fix this recent is worth using as it stands rather than paying for another. */
+        private const val CACHED_FIX_MAX_AGE_MS = 60 * 1000L
+        /** How long to leave GPS on waiting for one fix of our own. */
+        private const val FIX_TIMEOUT_MS = 30 * 1000L
 
         fun start(context: Context, auto: Boolean = false) {
             val intent = Intent(context, TripTrackingService::class.java)
@@ -598,6 +855,25 @@ class TripTrackingService : Service() {
             context.startService(
                 Intent(context, TripTrackingService::class.java).setAction(ACTION_STOP)
             )
+        }
+
+        /** Asks the service to keep the watch itself, on phones where Google cannot. */
+        fun watch(context: Context) {
+            runCatching {
+                context.startForegroundService(
+                    Intent(context, TripTrackingService::class.java).setAction(ACTION_WATCH)
+                )
+            }.onFailure { Log.w(TAG, "Could not start the watch: ${it.message}") }
+        }
+
+        /** Stands the watch down. Does nothing if nobody is watching, rather than starting one. */
+        fun stopWatch(context: Context) {
+            if (!TripTracker.state.value.watching) return
+            runCatching {
+                context.startService(
+                    Intent(context, TripTrackingService::class.java).setAction(ACTION_STOP_WATCH)
+                )
+            }
         }
 
         fun send(context: Context, action: String) {

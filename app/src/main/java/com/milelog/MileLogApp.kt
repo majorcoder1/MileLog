@@ -24,7 +24,7 @@ class MileLogApp : Application() {
             val repo = Repo.get(this@MileLogApp)
             repo.seed()
             closeOutAbandonedTrip(repo)
-            if (repo.prefs.autoDetect) DriveDetect.enable(this@MileLogApp)
+            DriveDetect.apply(this@MileLogApp)
         }
         Jobs.scheduleAll(this)
     }

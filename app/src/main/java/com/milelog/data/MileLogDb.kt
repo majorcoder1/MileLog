@@ -9,13 +9,21 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.TypeConverters
 import java.time.LocalDate
 
+/**
+ * The schema version, named so that everything which has to agree with it can refer to
+ * the same constant. Backup.whyUnusable kept its own copy of this number, and the moment
+ * the service history table was added the two disagreed, which made every backup this
+ * app produced look like it came from the future and refused to restore it.
+ */
+const val DB_VERSION = 2
+
 @Database(
     entities = [
         Trip::class, Txn::class, Purpose::class, Category::class, Vehicle::class,
         FavoritePlace::class, MileageRate::class, WorkWindow::class, Shift::class,
         ServiceReminder::class, ServiceLog::class
     ],
-    version = 2,
+    version = DB_VERSION,
     // Exported so a future version can be migrated onto rather than dropped.
     exportSchema = true
 )

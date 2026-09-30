@@ -11,7 +11,9 @@ data class LiveTrip(
     val startedAt: Long = 0,
     val points: List<Pair<Double, Double>> = emptyList(),
     val autoStarted: Boolean = false,
-    val lastFixAt: Long = 0
+    val lastFixAt: Long = 0,
+    /** No drive in progress, but the service is watching for the next one itself. */
+    val watching: Boolean = false
 )
 
 /** Single source of truth the service writes and the screens read. */

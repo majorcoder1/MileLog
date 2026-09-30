@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.provider.DocumentsContract
+import com.milelog.data.DB_VERSION
 import com.milelog.data.MileLogDb
 import com.milelog.data.Repo
 import java.io.File
@@ -22,8 +23,6 @@ object Backup {
     private const val KEEP = 30
     private const val DB_NAME = "milelog.db"
     private const val MARKER = "milelog-backup"
-    /** Must match the version on MileLogDb. */
-    private const val SCHEMA_VERSION = 1
 
     fun dir(context: Context): File = File(context.filesDir, "backups").apply { mkdirs() }
 
@@ -241,7 +240,7 @@ object Backup {
                     if (c.moveToFirst()) c.getInt(0) else 0
                 }
             }.getOrDefault(0)
-            if (version > SCHEMA_VERSION) {
+            if (version > DB_VERSION) {
                 return@use "That backup came from a newer version of MileLog ($version). " +
                     "Update the app before restoring it."
             }

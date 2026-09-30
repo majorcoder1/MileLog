@@ -11,6 +11,18 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(K_AUTO_DETECT, false)
         set(v) = sp.edit { putBoolean(K_AUTO_DETECT, v) }
 
+    /**
+     * Whether drive detection goes through Google's motion service.
+     *
+     * On by default because it is the most accurate and the cheapest on the battery. Off
+     * means MileLog watches the phone's own GPS instead and no part of tracking touches
+     * Google. Phones with Play services sandboxed or absent are put on the phone's own
+     * watch whatever this says — see DriveDetect.mode.
+     */
+    var useGoogleDetect: Boolean
+        get() = sp.getBoolean(K_USE_GOOGLE_DETECT, true)
+        set(v) = sp.edit { putBoolean(K_USE_GOOGLE_DETECT, v) }
+
     var scheduleEnabled: Boolean
         get() = sp.getBoolean(K_SCHEDULE, false)
         set(v) = sp.edit { putBoolean(K_SCHEDULE, v) }
@@ -60,6 +72,7 @@ class Prefs(context: Context) {
 
     private companion object {
         const val K_AUTO_DETECT = "auto_detect"
+        const val K_USE_GOOGLE_DETECT = "use_google_detect"
         const val K_SCHEDULE = "schedule_enabled"
         const val K_WORK_PURPOSE = "work_purpose"
         const val K_VEHICLE = "default_vehicle"

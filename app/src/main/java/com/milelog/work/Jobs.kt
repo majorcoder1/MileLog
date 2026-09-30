@@ -170,11 +170,15 @@ class DailyCheckWorker(context: Context, params: WorkerParameters) : CoroutineWo
 /**
  * Arms and disarms drive detection around the work hours you set.
  *
- * It deliberately does not start the tracking service itself. A background job has no
- * exemption from the foreground-service start rules, so that throws
- * ForegroundServiceStartNotAllowedException. Activity-recognition transitions do have an
- * exemption, so this worker only decides whether detection is listening, and the drive
- * itself is what starts the service.
+ * With Google doing the detecting this only decides whether detection is listening:
+ * a background job has no exemption from the foreground-service start rules, so trying
+ * to start the tracker here throws ForegroundServiceStartNotAllowedException, whereas an
+ * activity-recognition transition is exempt and can start it when the drive happens.
+ *
+ * Without Google there is nothing to listen on our behalf, so this does try to put the
+ * service's own watch back. That start may well be refused, which is survivable — it is
+ * caught, and opening the app re-arms the watch — but it is worth attempting, because
+ * work hours starting is the moment it matters most.
  */
 class ScheduleWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {

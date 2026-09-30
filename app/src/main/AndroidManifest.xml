@@ -13,6 +13,15 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+      Drive detection can go through Google Play services, and whether that is worth
+      offering depends on whether Play services itself holds the location and activity
+      permissions it needs. Asking that question needs the package to be visible.
+    -->
+    <queries>
+        <package android:name="com.google.android.gms" />
+    </queries>
+
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 

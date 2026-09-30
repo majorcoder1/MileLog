@@ -99,6 +99,10 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
     var backupFolder by remember { mutableStateOf(prefs.backupFolderUri) }
     var lastFolderCopy by remember { mutableStateOf(prefs.lastFolderCopyEpoch) }
     var autoDetect by remember { mutableStateOf(prefs.autoDetect) }
+    var useGoogle by remember { mutableStateOf(prefs.useGoogleDetect) }
+    // Whether Google could do the detecting at all on this phone. Read once per visit to
+    // the screen, since it only changes when permissions do, and that happens elsewhere.
+    val googleProblem = remember { DriveDetect.googleProblem(context) }
     var workPurposeId by remember { mutableStateOf(prefs.workHoursPurposeId.takeIf { it != 0L }) }
 
     var editWindow by remember { mutableStateOf<WorkWindow?>(null) }
@@ -222,6 +226,32 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
                         ).show()
                     }
                 }
+                ToggleRow(
+                    "Use Google for drive detection",
+                    checked = useGoogle && googleProblem == null,
+                    enabled = googleProblem == null
+                ) { on ->
+                    useGoogle = on
+                    prefs.useGoogleDetect = on
+                    // Switch the phone over now rather than at the next restart.
+                    if (prefs.autoDetect) DriveDetect.enable(context)
+                }
+                Text(
+                    when {
+                        googleProblem != null ->
+                            "$googleProblem MileLog is watching the phone's own GPS instead."
+                        useGoogle ->
+                            "Google's motion sensing notices when you start driving. The most " +
+                                "accurate way, and the easiest on the battery."
+                        else ->
+                            "MileLog watches the phone's own GPS, with no Google involved. It " +
+                                "costs a little more battery, and a drive can take a minute or " +
+                                "two to be picked up."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (googleProblem != null) Warn else TextMid
+                )
+                Spacer(Modifier.height(6.dp))
                 ToggleRow("Track during my work hours", scheduleOn) { on ->
                     scheduleOn = on
                     prefs.scheduleEnabled = on
@@ -833,16 +863,22 @@ fun SettingsScreen(vm: SettingsVm, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = TextHi, modifier = Modifier.weight(1f))
+        Text(label, color = if (enabled) TextHi else TextLow, modifier = Modifier.weight(1f))
         Switch(
             checked = checked,
             onCheckedChange = onChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(checkedTrackColor = Blue)
         )
     }

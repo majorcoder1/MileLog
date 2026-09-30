@@ -123,17 +123,18 @@ fun HomeScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        val motion = granted[Manifest.permission.ACTIVITY_RECOGNITION] ?: true
-        if (fine && motion) {
-            vm.setAutoDetect(true)
-            DriveDetect.enable(context)
+        // Physical activity being refused no longer settles it. That permission is only
+        // needed for Google's way of spotting a drive; without it MileLog watches the
+        // phone's own GPS instead, which needs nothing but location.
+        vm.setAutoDetect(fine)
+        if (fine && DriveDetect.enable(context)) {
             permissionNote = null
             if (!DriveDetect.hasBackgroundLocation(context)) {
                 backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             }
         } else {
             vm.setAutoDetect(false)
-            permissionNote = "Auto detect needs location and physical activity permission."
+            permissionNote = "Auto detect needs permission to use your location."
         }
     }
 
@@ -199,6 +200,8 @@ fun HomeScreen(
                     live.active -> "Recording now. ${Fmt.miles(live.miles)} miles so far."
                     autoDetect && !hasBackgroundLocation ->
                         "On, but it can only record while the app is open."
+                    live.watching ->
+                        "Watching for your next drive. GPS stays off until the phone moves."
                     autoDetect -> "Auto-tracking your drives. You're good to go."
                     else -> "Off. Use the plus button to start a drive by hand."
                 },
