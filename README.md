@@ -47,8 +47,9 @@ and point it at your own keystore, or set `MILELOG_KEYSTORE`, `MILELOG_STORE_PAS
 out unsigned. **The signing key is not in this repository and must never be.**
 
 ```bash
-./gradlew assembleRelease
-./gradlew testDebugUnitTest
+./gradlew assemblePlayRelease   # with Google motion detection
+./gradlew assembleFossRelease   # no Google code (the F-Droid build)
+./gradlew testPlayDebugUnitTest
 ```
 
 ## Layout

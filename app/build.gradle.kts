@@ -38,6 +38,14 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // "play" keeps Google's motion service for drive detection; "foss" has no Google code
+    // at all and is the one built for F-Droid.
+    flavorDimensions += "dist"
+    productFlavors {
+        create("play") { dimension = "dist" }
+        create("foss") { dimension = "dist" }
+    }
+
     signingConfigs {
         create("release") {
             releaseKeystore?.let { key ->
@@ -101,9 +109,9 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
 
     implementation("androidx.work:work-runtime-ktx:2.10.5")
-    implementation("com.google.android.gms:play-services-location:21.4.0")
+    "playImplementation"("com.google.android.gms:play-services-location:21.4.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+    "playImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 

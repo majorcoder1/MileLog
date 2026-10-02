@@ -1,19 +1,11 @@
 package com.milelog.tracking
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
-import com.google.android.gms.location.ActivityRecognition
-import com.google.android.gms.location.ActivityTransition
-import com.google.android.gms.location.ActivityTransitionRequest
-import com.google.android.gms.location.DetectedActivity
 import com.milelog.data.Prefs
 
 /**
@@ -54,12 +46,7 @@ object DriveDetect {
      * successfully, which is the failure that loses a day of driving without a word.
      */
     fun googleProblem(context: Context): String? {
-        val available = runCatching {
-            GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
-        }.getOrDefault(ConnectionResult.SERVICE_MISSING)
-        if (available != ConnectionResult.SUCCESS) {
-            return "Google Play services is not available on this phone."
-        }
+        GoogleMotion.unavailableReason(context)?.let { return it }
         if (!hasPermission(context)) {
             return "MileLog has no physical-activity permission yet."
         }
@@ -124,39 +111,14 @@ object DriveDetect {
 
     // ---- Google's motion service ----------------------------------------------------
 
-    private fun pendingIntent(context: Context): PendingIntent =
-        PendingIntent.getBroadcast(
-            context, 2001,
-            Intent(context, DriveDetectReceiver::class.java).setAction(DriveDetectReceiver.ACTION),
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-    @SuppressLint("MissingPermission")
     private fun startGoogle(context: Context): Boolean {
-        if (!hasPermission(context)) return false
-        val transitions = listOf(
-            ActivityTransition.Builder()
-                .setActivityType(DetectedActivity.IN_VEHICLE)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
-                .build(),
-            ActivityTransition.Builder()
-                .setActivityType(DetectedActivity.IN_VEHICLE)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
-                .build()
-        )
-        return runCatching {
-            ActivityRecognition.getClient(context)
-                .requestActivityTransitionUpdates(ActivityTransitionRequest(transitions), pendingIntent(context))
-        }.isSuccess
+        if (!GoogleMotion.AVAILABLE || !hasPermission(context)) return false
+        return GoogleMotion.start(context)
     }
 
-    @SuppressLint("MissingPermission")
     private fun stopGoogle(context: Context) {
-        if (!hasPermission(context)) return
-        runCatching {
-            ActivityRecognition.getClient(context)
-                .removeActivityTransitionUpdates(pendingIntent(context))
-        }
+        if (!GoogleMotion.AVAILABLE || !hasPermission(context)) return
+        GoogleMotion.stop(context)
     }
 
     // ---- permissions ----------------------------------------------------------------

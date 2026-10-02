@@ -1,0 +1,11 @@
+MileLog keeps your business miles, expenses and income on your phone, with no account, no server and no subscription.
+
+- Tracks drives by GPS, odometer readings, or typed-in miles
+- Detects driving automatically by watching the phone's own GPS, with working-hours scheduling
+- Swipe right for work, left for personal
+- Expenses and revenue with receipt photos, and your profit worked out
+- Handles the IRS mileage rate correctly, including mid-year changes
+- Builds a year-end spreadsheet for your tax preparer
+- Optional backup to a folder you choose
+
+Your trips, including their GPS routes, never leave the phone.

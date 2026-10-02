@@ -1,0 +1,1 @@
+Drive detection no longer needs Google. Backups can go to a folder of your choosing.
