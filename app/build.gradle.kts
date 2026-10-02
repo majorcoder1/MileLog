@@ -42,7 +42,11 @@ android {
     // at all and is the one built for F-Droid.
     flavorDimensions += "dist"
     productFlavors {
-        create("play") { dimension = "dist" }
+        create("play") {
+            dimension = "dist"
+            // com.milelog is already taken on Google Play, so the Play build has its own id.
+            applicationId = "live.fourthepeople.milelog"
+        }
         create("foss") { dimension = "dist" }
     }
 
