@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import com.milelog.data.Fmt
 import com.milelog.tracking.DriveDetect
+import com.milelog.tracking.GoogleMotion
 import com.milelog.tracking.TripTrackingService
 import com.milelog.ui.components.BigStat
 import com.milelog.ui.components.CardTitle
@@ -181,7 +182,7 @@ fun HomeScreen(
                             val needed = buildList {
                                 add(Manifest.permission.ACCESS_FINE_LOCATION)
                                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                                add(Manifest.permission.ACTIVITY_RECOGNITION)
+                                if (GoogleMotion.AVAILABLE) add(Manifest.permission.ACTIVITY_RECOGNITION)
                                 if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                             }
                             permissionLauncher.launch(needed.toTypedArray())

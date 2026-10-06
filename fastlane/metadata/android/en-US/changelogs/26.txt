@@ -1,0 +1,1 @@
+F-Droid build no longer asks for the physical-activity permission. Added a store icon.

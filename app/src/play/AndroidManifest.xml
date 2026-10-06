@@ -7,6 +7,8 @@
       permissions it needs. Asking that question needs the package to be visible.
       This file is only in the "play" build; the F-Droid build has no Google code.
     -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <queries>
         <package android:name="com.google.android.gms" />
     </queries>
