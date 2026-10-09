@@ -1,0 +1,1 @@
+Removed the dependency-info block from the APK signing block. No functional changes.

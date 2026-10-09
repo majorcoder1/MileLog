@@ -33,9 +33,15 @@ android {
         applicationId = "com.milelog"
         minSdk = 29
         targetSdk = 36
-        versionCode = 26
-        versionName = "3.5"
+        versionCode = 27
+        versionName = "3.6"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    // No Google-encrypted dependency blob in the APK signing block (IzzyOnDroid/F-Droid).
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     // "play" keeps Google's motion service for drive detection; "foss" has no Google code
