@@ -35,6 +35,7 @@ import com.milelog.data.TripSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -69,6 +70,8 @@ import kotlin.coroutines.resume
 class TripTrackingService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** The final save of a leg. Shutting down waits for it so the end of a trip is kept. */
+    @Volatile private var saveJob: Job? = null
     private val locations by lazy { getSystemService(LocationManager::class.java) }
     private lateinit var repo: Repo
 
@@ -271,7 +274,7 @@ class TripTrackingService : Service() {
         parkedAt = last
         TripTracker.clear()
 
-        scope.launch {
+        saveJob = scope.launch(NonCancellable) {
             val trip = repo.trips.byId(id)
             if (trip != null) {
                 // A drive under a tenth of a mile is noise, not a trip.
@@ -315,7 +318,10 @@ class TripTrackingService : Service() {
         idleTimer?.cancel()
         stopWatching()
         runCatching { locations?.removeUpdates(listener) }
+        val pending = saveJob
         scope.launch {
+            // onDestroy cancels the scope, so let the last save of the trip finish first.
+            pending?.join()
             TripTracker.clear()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
