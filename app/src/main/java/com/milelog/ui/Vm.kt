@@ -136,7 +136,8 @@ enum class TripsTab(val label: String) { TRIPS("Trips"), DAILY("Daily"), WEEKLY(
 /** null purposeId with unclassifiedOnly = false means "all trips". */
 data class TripFilter(
     val purposeId: Long? = null,
-    val unclassifiedOnly: Boolean = false,
+    // The list opens on what still needs filing.
+    val unclassifiedOnly: Boolean = true,
     val period: PeriodChoice = PeriodChoice(Period.THIS_YEAR),
     val placeQuery: String = ""
 ) {
