@@ -8,7 +8,7 @@ platforms, with a spreadsheet at the end of the year that a tax preparer can rea
 
 ## Download
 
-**[Get MileLog on F-Droid](https://f-droid.org/packages/com.milelog/)**
+[<img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/com.milelog/)
 
 The F-Droid build has no Google code and is the one to install. F-Droid builds it from
 the source tagged in this repository and signs it with its own key, so updates come
