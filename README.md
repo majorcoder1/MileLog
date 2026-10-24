@@ -6,6 +6,19 @@ stays on the phone — no account, no server, no subscription.
 Built for one driver's actual working day: delivery and rideshare work across several
 platforms, with a spreadsheet at the end of the year that a tax preparer can read.
 
+## Download
+
+**[Get MileLog on F-Droid](https://f-droid.org/packages/com.milelog/)**
+
+The F-Droid build has no Google code and is the one to install. F-Droid builds it from
+the source tagged in this repository and signs it with its own key, so updates come
+through the F-Droid app.
+
+- Package name: `com.milelog`
+- Latest version: 3.7
+- Source code: this repository (also at https://gitlab.com/4the-people-media-group/MileLog)
+- Privacy: see [PRIVACY.md](PRIVACY.md)
+
 ## What it does
 
 - **Tracks drives** by GPS, by odometer readings, or by typing the miles in.
