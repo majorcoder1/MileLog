@@ -92,3 +92,9 @@ Map tiles come from the OpenStreetMap Foundation; map data is © OpenStreetMap
 contributors, available under the Open Database License. An app distributed to
 more than a handful of people should point osmdroid at its own tile server rather
 than OSM's public one, which their usage policy does not permit for that.
+
+## Support
+
+This project is free and open source. If it is useful to you, you can support my work with a donation:
+
+[![Donate using Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/majorcoder1/donate)
